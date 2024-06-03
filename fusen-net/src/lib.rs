@@ -1,5 +1,3 @@
 pub mod server;
 pub mod client;
-
-
-pub struct Channel;
+pub type Error = Box<dyn std::error::Error + Send + Sync>;

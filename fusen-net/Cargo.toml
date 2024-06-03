@@ -11,3 +11,10 @@ description.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 futures.workspace = true
+
+
+#日志处理
+tracing.workspace = true
+tracing-futures.workspace = true
+tracing-subscriber.workspace = true
+pretty_env_logger.workspace = true
