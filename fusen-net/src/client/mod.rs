@@ -40,26 +40,23 @@ impl Client {
         let frame = frame::Frame::Register(info);
         let mut buffer = Buffer::new(tcp_stream);
         let _ = buffer.write_frame(&frame).await?;
-        match buffer.read_frame_block().await {
-            Ok(frame) => {
-                info!("receiver server frame : {:?}", frame);
-                match frame {
-                    Frame::ACK => loop {
-                        match buffer.read_frame().await {
-                            Ok(frame) => {
-                                let _ = tokio::time::sleep(Duration::from_secs(1));
-                                if let Some(frame) = frame {
-                                    info!("receiver server frame : {:?}", frame);
-                                }
-                            }
-                            Err(error) => error!("{:?}", error.to_string()),
+        loop {
+            match buffer.read_frame().await {
+                Ok(frame) => {
+                    info!("receiver server frame : {:?}", frame);
+                    match frame {
+                        Frame::PING => {
+                            let _ = buffer.write_frame(&Frame::ACK).await;
                         }
-                    },
-                    _ => error!("receiver error frame"),
+                        Frame::ACK => {
+                            info!("register success");
+                        }
+                        _ => error!("receiver error frame"),
+                    }
                 }
-            }
-            Err(error) => error!("read server timeout : {:?}", error),
-        };
+                Err(error) => error!("read server timeout : {:?}", error),
+            };
+        }
         Ok(())
     }
 }

@@ -4,6 +4,7 @@ use std::io::Cursor;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{io::BufWriter, net::TcpStream};
+use tracing::info;
 
 pub struct Buffer {
     stream: BufWriter<TcpStream>,
@@ -18,36 +19,22 @@ impl Buffer {
         };
     }
 
-    pub async fn read_frame(&mut self) -> Result<Option<Frame>, crate::Error> {
+    pub async fn read_frame(&mut self) -> Result<Frame, crate::Error> {
         loop {
             let mut buf = Cursor::new(&self.buffer[..]);
             if let Ok(frame) = Frame::parse(&mut buf) {
                 self.buffer.advance(buf.position() as usize);
-                return Ok(Some(frame));
+                return Ok(frame);
             }
             if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                return if self.buffer.is_empty() {
-                    Ok(None)
-                } else {
-                    Err("connection reset by peer".into())
-                };
-            }
-        }
-    }
-
-    pub async fn read_frame_block(&mut self) -> Result<Frame, crate::Error> {
-        loop {
-            let result = self.read_frame().await?;
-            match result {
-                Some(frame) => return Ok(frame),
-                None => continue,
+                return Err("connection reset by peer".into());
             }
         }
     }
 
     pub async fn read_frame_wait(&mut self, time: Duration) -> Result<Frame, crate::Error> {
         let frame = tokio::select! {
-            res = self.read_frame_block() => res?,
+            res = self.read_frame() => res?,
             _ = tokio::time::sleep(time) => return Err("time out".into())
         };
         Ok(frame)

@@ -46,7 +46,7 @@ impl Server {
                         shutdown_complete_tx.clone(),
                         Shutdown::new(notify_shutdown.subscribe()),
                     );
-                    tokio::spawn(async move { channel.run() });
+                    tokio::spawn(async move { channel.run().await });
                 }
                 Err(err) => error!("tcp connect, err: {:?}", err),
             }
