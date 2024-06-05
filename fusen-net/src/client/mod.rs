@@ -1,6 +1,4 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::Duration;
-
 use crate::frame::Frame;
 use crate::{buffer::Buffer, frame, ChannelInfo};
 use tokio::net::TcpSocket;

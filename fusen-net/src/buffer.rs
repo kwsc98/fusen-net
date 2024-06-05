@@ -4,7 +4,6 @@ use std::io::Cursor;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{io::BufWriter, net::TcpStream};
-use tracing::info;
 
 pub struct Buffer {
     stream: BufWriter<TcpStream>,

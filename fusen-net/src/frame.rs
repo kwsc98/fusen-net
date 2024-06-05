@@ -1,8 +1,8 @@
-use std::{io::Cursor, string::FromUtf8Error};
+use bytes::{buf, Buf};
+use serde::{Deserialize, Serialize};
+use std::{fmt::Debug, io::Cursor, string::FromUtf8Error};
 
-use bytes::Buf;
-
-use crate::ChannelInfo;
+use crate::{ChannelInfo, MetaData};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,59 +10,91 @@ pub enum Error {
     Other(crate::Error),
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegisterInfo {
+    tag: String,
+    tcp_port: Option<String>,
+    udp_port: Option<String>,
+    mate_data: MetaData,
+}
+
+pub struct Data {
+    target_port: u16,
+    bytes: Vec<u8>,
+}
+
+impl Debug for Data {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Data")
+            .field("target_port", &self.target_port)
+            .field("bytes", &"...")
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum Frame {
-    PING,
-    ACK,
-    ERROR,
-    NotFind,
-    Register(ChannelInfo),
-    Subscribe(String),
+    Ping,
+    Ack,
+    Register(RegisterInfo),
+    SendFrame(Data),
 }
 
 impl Frame {
-    pub fn parse(src: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
-        let first = pop_first_u8(src)?;
-        let data_str = get_str(src)?;
-        Ok(match first {
-            b'+' => Frame::Register(serde_json::from_str(&data_str)?),
-            b'$' => Frame::Subscribe(data_str),
-            b'*' => match data_str.as_str() {
-                "ack" => Frame::ACK,
-                "error" => Frame::ERROR,
-                "notfind" => Frame::NotFind,
-                _ => Frame::PING,
+    pub fn parse(bytes: &mut Cursor<&[u8]>) -> Result<Frame, Error> {
+        let first = pop_first_u8(bytes)?;
+        if first != b'0' {
+            return Err(Error::Other("parse verify error".into()));
+        }
+        let start = bytes.position() as usize + 1;
+        let buf = bytes.get_ref();
+        let end = buf.len() as usize - 1;
+        if start == end {
+            return Err(Error::Incomplete);
+        }
+        let lenght: usize = get_u16(buf, start) as usize;
+        if end - start - 1 < lenght {
+            return Err(Error::Incomplete);
+        }
+        let start = start + 2;
+        let buf = &buf[start..start + lenght];
+        match buf[0] {
+            b'*' => {
+                let target_port = get_u16(buf, 1);
+                let bytes = buf[3..].to_vec();
+                Frame::SendFrame(Data { target_port, bytes })
+            }
+            b'!' => match buf[1..buf.len()].as_ref() {
+                b"ping" => Frame::Ping,
+                _ => Frame::Ack,
             },
-            u8 => return Err(Error::Other(format!("'{}' not support", u8).into())),
-        })
+            b'+' => Frame::Register(serde_json::from_slice(&buf[1..])?),
+            _ => return Err(Error::Other("parse error".into())),
+        };
+
+        todo!()
     }
 
     pub fn serialization(&self) -> Result<Vec<u8>, crate::Error> {
         let mut bytes = vec![];
+        bytes.extend_from_slice(b"000");
         match self {
-            Frame::PING => {
+            Frame::SendFrame(data) => {
                 bytes.push(b'*');
+                bytes.extend_from_slice(&u16_to_u8(data.target_port));
+                bytes.extend_from_slice(&data.bytes);
+            }
+            Frame::Ping => {
+                bytes.push(b'!');
                 bytes.extend_from_slice(b"ping");
             }
-            Frame::ACK => {
-                bytes.push(b'*');
+            Frame::Ack => {
+                bytes.push(b'!');
                 bytes.extend_from_slice(b"ack");
             }
-            Frame::ERROR => {
-                bytes.push(b'*');
-                bytes.extend_from_slice(b"error");
-            }
-            Frame::NotFind => {
-                bytes.push(b'*');
-                bytes.extend_from_slice(b"notfind");
-            }
-            Frame::Register(channel_info) => {
+            Frame::Register(register_info) => {
                 bytes.push(b'+');
-                bytes.extend_from_slice(serde_json::to_string(channel_info)?.as_bytes());
-            }
-            Frame::Subscribe(tag) => {
-                bytes.push(b'$');
-                bytes.extend_from_slice(tag.as_bytes());
+                bytes.extend_from_slice(serde_json::to_string(register_info)?.as_bytes());
             }
         }
         bytes.extend_from_slice(b"\r\n");
@@ -102,4 +134,15 @@ impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Error {
         return Error::Other(format!("json serialize err : {}", error.to_string()).into());
     }
+}
+
+fn get_u16(u8_array: &[u8], start: usize) -> u16 {
+    let mut lenght: u16 = u8_array[start] as u16;
+    lenght <<= 8;
+    lenght |= u8_array[start + 1] as u16;
+    lenght
+}
+
+fn u16_to_u8(u16: u16) -> [u8; 2] {
+    [(u16 >> 8) as u8, u16 as u8]
 }
