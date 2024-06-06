@@ -1,5 +1,5 @@
 use crate::frame::Frame;
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::time::Duration;
@@ -33,7 +33,6 @@ impl Buffer {
         if 0 == self.stream.read_buf(&mut self.buffer).await? {
             return Err("connection reset by peer".into());
         }
-        println!("{:?}",String::from_utf8(self.buffer.chunk().to_vec()));
         Ok(&self.buffer)
     }
 

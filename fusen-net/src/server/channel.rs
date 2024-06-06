@@ -1,13 +1,14 @@
 use super::cache::AsyncCache;
 use crate::buffer::Buffer;
-use crate::frame::Frame;
-use crate::shutdown::{self, Shutdown};
-use crate::{connection, frame, ChannelInfo};
+use crate::connection::connect;
+use crate::frame::{ConnectionInfo, Frame};
+use crate::shutdown::Shutdown;
+use crate::{frame, ChannelInfo};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tracing::info;
 
 pub struct Channel {
@@ -64,7 +65,7 @@ impl Channel {
                     match frame {
                         frame::Frame::Register(register_info) => {
                             let channel_info = Arc::new(ChannelInfo {
-                                net_addr: socket_addr.clone(),
+                                _net_addr: socket_addr.clone(),
                                 register_info,
                                 sender: sender.clone(),
                             });
@@ -96,7 +97,7 @@ impl Channel {
                                 .await?
                                 .ok_or(format!("not find : {:?}", connection_info))?;
                             let channel_info = Arc::new(ChannelInfo {
-                                net_addr: socket_addr.clone(),
+                                _net_addr: socket_addr.clone(),
                                 register_info: Default::default(),
                                 sender: sender.clone(),
                             });
@@ -108,7 +109,7 @@ impl Channel {
                                 .await;
                             tokio::spawn(async move {
                                 let tag = connection_info.get_source_tag().to_owned();
-                                let _ = connection::handler(
+                                let _ = handler(
                                     connection_info,
                                     buffer,
                                     target_channel_info,
@@ -120,7 +121,6 @@ impl Channel {
                             return Ok(());
                         }
                         frame::Frame::TargetConnection(connection_info) => {
-                            println!("---{:?}", connection_info);
                             let source_channel_info = async_cache
                                 .get(connection_info.get_source_tag().to_owned())
                                 .await?
@@ -144,4 +144,21 @@ impl Channel {
             }
         }
     }
+}
+
+async fn handler(
+    connection_info: ConnectionInfo,
+    mut buffer1: Buffer,
+    channel_info: Arc<ChannelInfo>,
+    mut receiver: UnboundedReceiver<Frame>,
+) -> Result<(), crate::Error> {
+    channel_info
+        .sender
+        .send(Frame::Connection(connection_info))?;
+    let frame = receiver.recv().await.ok_or("receive error")?;
+    let Frame::TargetBuffer(buffer2) = frame else {
+        return Err("receive error frame".into());
+    };
+    let _ = buffer1.write_frame(&Frame::Ack).await;
+    connect(buffer1, buffer2).await
 }

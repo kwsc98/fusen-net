@@ -26,19 +26,19 @@ pub enum Protocol {
 
 #[derive(Clone, Debug)]
 pub struct ChannelInfo {
-    net_addr: SocketAddr,
+    _net_addr: SocketAddr,
     register_info: RegisterInfo,
     sender: UnboundedSender<Frame>,
 }
 
 impl ChannelInfo {
     pub fn new(
-        net_addr: SocketAddr,
+        _net_addr: SocketAddr,
         register_info: RegisterInfo,
         sender: UnboundedSender<Frame>,
     ) -> Self {
         Self {
-            net_addr,
+            _net_addr,
             register_info,
             sender,
         }

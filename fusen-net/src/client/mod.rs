@@ -1,4 +1,4 @@
-use crate::buffer::{self, Buffer};
+use crate::buffer::Buffer;
 use crate::common::get_uuid;
 use crate::connection;
 use crate::frame::{ConnectionInfo, Frame, RegisterInfo};
@@ -26,7 +26,7 @@ impl Client {
                 Frame::Ping => {
                     let _ = buffer.write_frame(&Frame::Ack).await;
                 }
-                Frame::Connection(mut connection) => {
+                Frame::Connection(connection) => {
                     let host = host.clone();
                     tokio::spawn(async move {
                         let tcp_stream = TcpStream::connect(connection.get_target_host())
@@ -35,7 +35,9 @@ impl Client {
                         let buffer = Buffer::new(tcp_stream);
                         let tcp_stream = TcpStream::connect(host).await.unwrap();
                         let mut buffer2 = Buffer::new(tcp_stream);
-                        let _ = buffer2.write_frame(&Frame::TargetConnection(connection)).await;
+                        let _ = buffer2
+                            .write_frame(&Frame::TargetConnection(connection))
+                            .await;
                         let _frame = tokio::select! {
                             res = buffer2.read_frame() => res.unwrap(),
                             _ = tokio::time::sleep(Duration::from_secs(3)) => panic!("connect time out"),

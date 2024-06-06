@@ -10,9 +10,6 @@ description.workspace = true
 name = "client"
 path = "src/client.rs"
 [[bin]]
-name = "client-agent"
-path = "src/client_agent.rs"
-[[bin]]
 name = "server"
 path = "src/server.rs"
 

@@ -147,21 +147,6 @@ fn pop_first_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
     return Ok(src.get_u8());
 }
 
-fn get_str(src: &mut Cursor<&[u8]>) -> Result<String, Error> {
-    let start = src.position() as usize;
-    let array = src.get_ref();
-    let end = array.len() - 1;
-    for i in start..end {
-        if array[i] == b'\r' && array[i + 1] == b'\n' {
-            src.set_position((i + 2) as u64);
-            let str_vec = (&src.get_ref()[start..i]).to_vec();
-            let string = String::from_utf8(str_vec)?;
-            return Ok(string);
-        }
-    }
-    return Err(Error::Incomplete);
-}
-
 impl From<FromUtf8Error> for Error {
     fn from(_src: FromUtf8Error) -> Error {
         return Error::Other("protocol error; invalid frame format".into());
@@ -179,8 +164,4 @@ fn get_u16(u8_array: &[u8], start: usize) -> u16 {
     lenght <<= 8;
     lenght |= u8_array[start + 1] as u16;
     lenght
-}
-
-fn u16_to_u8(u16: u16) -> [u8; 2] {
-    [(u16 >> 8) as u8, u16 as u8]
 }
