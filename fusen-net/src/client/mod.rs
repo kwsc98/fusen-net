@@ -1,59 +1,82 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use crate::frame::Frame;
-use crate::{buffer::Buffer, frame, ChannelInfo};
-use tokio::net::TcpSocket;
-use tracing::error;
+use crate::buffer::{self, Buffer};
+use crate::common::get_uuid;
+use crate::connection;
+use crate::frame::{ConnectionInfo, Frame, RegisterInfo};
+use std::net::SocketAddr;
+use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream};
 use tracing::info;
 
 pub struct Client;
 
 impl Client {
-    pub async fn register(
-        register_addr: String,
-        tag: String,
-        port: u16,
-    ) -> Result<(), crate::Error> {
-        let host: Vec<&str> = register_addr.split(":").collect();
-        let ip: Vec<&str> = host[0].split(".").collect();
-        let ip = ip.iter().enumerate().fold([0_u8; 4], |mut res, e| {
-            res[e.0] = e.1.parse().unwrap();
-            res
-        });
-        let server_port: u16 = host[1].parse()?;
-        let server_addr = SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]),
-            server_port,
-        ));
-        let local_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port));
-        let server_sock = TcpSocket::new_v4().unwrap();
-        #[cfg(target_family = "unix")]
-        {
-            server_sock.set_reuseport(true).unwrap();
-        }
-        server_sock.set_reuseaddr(true).unwrap();
-        server_sock.bind(local_addr).unwrap();
-        let tcp_stream = server_sock.connect(server_addr).await?;
-        let mut info = ChannelInfo::new(crate::Protocol::V4);
-        info.set_tag(tag);
-        let frame = frame::Frame::Register(info);
+    pub async fn register(register_addr: String, tag: String) -> Result<(), crate::Error> {
+        let host: SocketAddr = register_addr.parse().unwrap();
+        let tcp_stream = TcpStream::connect(host).await?;
         let mut buffer = Buffer::new(tcp_stream);
-        let _ = buffer.write_frame(&frame).await?;
+        let _ = buffer
+            .write_frame(&Frame::Register(RegisterInfo::new(tag)))
+            .await;
+        let _frame = tokio::select! {
+            res = buffer.read_frame() => res?,
+            _ = tokio::time::sleep(Duration::from_secs(3)) => return Err("register time out".into()),
+        };
         loop {
-            match buffer.read_frame().await {
-                Ok(frame) => {
-                    info!("receiver server frame : {:?}", frame);
-                    match frame {
-                        Frame::PING => {
-                            let _ = buffer.write_frame(&Frame::ACK).await;
-                        }
-                        Frame::ACK => {
-                            info!("register success");
-                        }
-                        _ => error!("receiver error frame"),
-                    }
+            match buffer.read_frame().await? {
+                Frame::Ping => {
+                    let _ = buffer.write_frame(&Frame::Ack).await;
                 }
-                Err(error) => error!("read server timeout : {:?}", error),
-            };
+                Frame::Connection(mut connection) => {
+                    let host = host.clone();
+                    tokio::spawn(async move {
+                        let tcp_stream = TcpStream::connect(connection.get_target_host())
+                            .await
+                            .unwrap();
+                        let buffer = Buffer::new(tcp_stream);
+                        let tcp_stream = TcpStream::connect(host).await.unwrap();
+                        let mut buffer2 = Buffer::new(tcp_stream);
+                        let _ = buffer2.write_frame(&Frame::TargetConnection(connection)).await;
+                        let _frame = tokio::select! {
+                            res = buffer2.read_frame() => res.unwrap(),
+                            _ = tokio::time::sleep(Duration::from_secs(3)) => panic!("connect time out"),
+                        };
+                        let _ = connection::connect(buffer, buffer2).await;
+                    });
+                }
+                frame => info!("rev not support frame : {:?}", frame),
+            }
+        }
+    }
+
+    pub async fn agent(
+        register_addr: String,
+        target_tag: String,
+        target_host: String,
+        agent_port: String,
+    ) -> Result<(), crate::Error> {
+        let listener = TcpListener::bind(&format!("0.0.0.0:{}", agent_port)).await?;
+        while let Ok(tcp_stream) = listener.accept().await {
+            let register_addr: String = register_addr.clone();
+            let target_tag: String = target_tag.clone();
+            let target_host: String = target_host.clone();
+            let buffer2 = Buffer::new(tcp_stream.0);
+            tokio::spawn(async move {
+                let host: SocketAddr = register_addr.parse().unwrap();
+                let tcp_stream = TcpStream::connect(host).await.unwrap();
+                let mut buffer = Buffer::new(tcp_stream);
+                let _ = buffer
+                    .write_frame(&Frame::Connection(ConnectionInfo::new(
+                        get_uuid(),
+                        target_tag,
+                        target_host,
+                    )))
+                    .await;
+                let _frame = tokio::select! {
+                    res = buffer.read_frame() => res.unwrap(),
+                    _ = tokio::time::sleep(Duration::from_secs(3)) => panic!("agent time out"),
+                };
+                let _ = connection::connect(buffer, buffer2).await;
+            });
         }
         Ok(())
     }

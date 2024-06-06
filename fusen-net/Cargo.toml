@@ -22,3 +22,5 @@ pretty_env_logger.workspace = true
 #json处理
 serde.workspace = true
 serde_json.workspace = true
+
+uuid.workspace = true

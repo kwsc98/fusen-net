@@ -1,14 +1,14 @@
 use super::cache::AsyncCache;
 use crate::buffer::Buffer;
-use crate::shutdown::Shutdown;
-use crate::socket::get_tcp_stream;
-use crate::{frame, ChannelInfo, Protocol};
+use crate::frame::Frame;
+use crate::shutdown::{self, Shutdown};
+use crate::{connection, frame, ChannelInfo};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::info;
 
 pub struct Channel {
     stream: TcpStream,
@@ -16,6 +16,12 @@ pub struct Channel {
     async_cache: AsyncCache<String, Arc<ChannelInfo>>,
     _shutdown_complete_tx: mpsc::Sender<()>,
     shutdown: Shutdown,
+}
+
+#[derive(Debug)]
+pub enum FrameType {
+    Socket(Frame),
+    Handler(Frame),
 }
 
 impl Channel {
@@ -44,74 +50,98 @@ impl Channel {
             mut shutdown,
         } = self;
         let mut buffer = Buffer::new(stream);
-        let (protocol, net_ip, net_port) = match socket_addr {
-            SocketAddr::V4(socke_v4) => (Protocol::V4, socke_v4.ip().to_string(), socke_v4.port()),
-            SocketAddr::V6(socke_v6) => (Protocol::V6, socke_v6.ip().to_string(), socke_v6.port()),
-        };
+        let (sender, mut receiver) = mpsc::unbounded_channel();
         loop {
             let frame = tokio::select! {
-                res = buffer.read_frame() => res?,
+                res = buffer.read_frame() => FrameType::Socket(res?),
+                res1 = receiver.recv() => FrameType::Handler(res1.ok_or::<crate::Error>("receiver error".into())?),
                 _ = shutdown.recv() => {
                     return Ok(());
                 }
             };
-            info!("rev frame : {:?} : socket_addr : {:?}", frame, socket_addr);
-
             match frame {
-                frame::Frame::Register(mut channel_info) => {
-                    channel_info.net_ip = net_ip.clone();
-                    channel_info.net_port = net_port.clone();
-                    channel_info.protocol = protocol.clone();
-                    let channel_info = Arc::new(channel_info);
-                    let _ = async_cache
-                        .insert(channel_info.tag.clone(), channel_info.clone())
-                        .await;
-                    let _ = buffer.write_frame(&frame::Frame::ACK).await;
-                    loop {
-                        match buffer.write_frame(&frame::Frame::PING).await {
-                            Ok(_) => (),
-                            Err(_) => {
-                                error!("ping send error : {:?}", channel_info);
-                                break;
-                            }
-                        };
-                        match buffer.read_frame_wait(Duration::from_secs(5)).await {
-                            Ok(_frame) => {
-                                tokio::time::sleep(Duration::from_secs(2)).await;
-                            }
-                            Err(error) => {
-                                error!("{:?}", error);
-                                break;
-                            }
-                        }
-                    }
-                    let _ = async_cache.remove(channel_info.tag.clone());
-                }
-                frame::Frame::Subscribe(tag) => {
-                    let channel_into = async_cache.get(tag).await;
-                    match channel_into {
-                        Ok(option) => match option {
-                            Some(info) => {
-                                let _ = buffer
-                                    .write_frame(&frame::Frame::Register(info.as_ref().clone()))
+                FrameType::Socket(frame) => {
+                    match frame {
+                        frame::Frame::Register(register_info) => {
+                            let channel_info = Arc::new(ChannelInfo {
+                                net_addr: socket_addr.clone(),
+                                register_info,
+                                sender: sender.clone(),
+                            });
+                            let _ = async_cache
+                                .insert(
+                                    channel_info.register_info.get_tag().to_owned(),
+                                    channel_info.clone(),
+                                )
+                                .await;
+                            let _ = buffer.write_frame(&frame::Frame::Ack).await;
+                            let async_cache_clone = async_cache.clone();
+                            //KeepAlive
+                            tokio::spawn(async move {
+                                loop {
+                                    tokio::time::sleep(Duration::from_secs(5)).await;
+                                    if let Err(_) = channel_info.sender.send(Frame::Ping) {
+                                        info!("register conn close : {:?}", channel_info);
+                                        break;
+                                    }
+                                }
+                                let _ = async_cache_clone
+                                    .remove(channel_info.register_info.get_tag().to_owned())
                                     .await;
-                            }
-                            None => {
-                                let _ = buffer.write_frame(&frame::Frame::NotFind).await;
-                            }
-                        },
-                        Err(_err) => {
-                            let _ = buffer.write_frame(&frame::Frame::ERROR).await;
+                            });
                         }
+                        frame::Frame::Connection(connection_info) => {
+                            let target_channel_info = async_cache
+                                .get(connection_info.get_target_tag().to_owned())
+                                .await?
+                                .ok_or(format!("not find : {:?}", connection_info))?;
+                            let channel_info = Arc::new(ChannelInfo {
+                                net_addr: socket_addr.clone(),
+                                register_info: Default::default(),
+                                sender: sender.clone(),
+                            });
+                            let _ = async_cache
+                                .insert(
+                                    connection_info.get_source_tag().to_owned(),
+                                    channel_info.clone(),
+                                )
+                                .await;
+                            tokio::spawn(async move {
+                                let tag = connection_info.get_source_tag().to_owned();
+                                let _ = connection::handler(
+                                    connection_info,
+                                    buffer,
+                                    target_channel_info,
+                                    receiver,
+                                )
+                                .await;
+                                let _ = async_cache.remove(tag).await;
+                            });
+                            return Ok(());
+                        }
+                        frame::Frame::TargetConnection(connection_info) => {
+                            println!("---{:?}", connection_info);
+                            let source_channel_info = async_cache
+                                .get(connection_info.get_source_tag().to_owned())
+                                .await?
+                                .ok_or(format!("not find : {:?}", connection_info))?;
+                            let _ = buffer.write_frame(&frame::Frame::Ack).await;
+                            let _ = source_channel_info.sender.send(Frame::TargetBuffer(buffer));
+                            let _ = async_cache
+                                .remove(connection_info.get_source_tag().to_owned())
+                                .await;
+                            return Ok(());
+                        }
+                        frame::Frame::Ping => {
+                            let _ = buffer.write_frame(&frame::Frame::Ack).await;
+                        }
+                        _ => (),
                     }
                 }
-                frame::Frame::PING => {
-                    let _ = buffer.write_frame(&frame::Frame::ACK).await;
+                FrameType::Handler(frame) => {
+                    let _ = buffer.write_frame(&frame).await;
                 }
-                _ => {
-                    let _ = buffer.write_frame(&frame::Frame::ACK).await;
-                }
-            };
+            }
         }
     }
 }

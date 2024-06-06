@@ -1,8 +1,12 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, net::SocketAddr};
 
+use frame::{Frame, RegisterInfo};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
 pub mod buffer;
 pub mod client;
+pub mod common;
+pub mod connection;
 pub mod frame;
 pub mod server;
 pub mod shutdown;
@@ -20,27 +24,23 @@ pub enum Protocol {
     V6,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ChannelInfo {
-    tag: String,
-    protocol: Protocol,
-    net_ip: String,
-    net_port: u16,
-    mate_data: MetaData,
+    net_addr: SocketAddr,
+    register_info: RegisterInfo,
+    sender: UnboundedSender<Frame>,
 }
 
 impl ChannelInfo {
-    pub fn new(protocol: Protocol) -> Self {
+    pub fn new(
+        net_addr: SocketAddr,
+        register_info: RegisterInfo,
+        sender: UnboundedSender<Frame>,
+    ) -> Self {
         Self {
-            tag: Default::default(),
-            protocol,
-            net_ip: Default::default(),
-            net_port: Default::default(),
-            mate_data: Default::default(),
+            net_addr,
+            register_info,
+            sender,
         }
-    }
-
-    pub fn set_tag(&mut self, tag: String) {
-        self.tag = tag;
     }
 }

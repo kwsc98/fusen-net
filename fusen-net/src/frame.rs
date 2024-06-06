@@ -1,8 +1,8 @@
-use bytes::{buf, Buf};
+use bytes::Buf;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, io::Cursor, string::FromUtf8Error};
 
-use crate::{ChannelInfo, MetaData};
+use crate::{buffer::Buffer, MetaData};
 
 #[derive(Debug)]
 pub enum Error {
@@ -10,25 +10,52 @@ pub enum Error {
     Other(crate::Error),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RegisterInfo {
     tag: String,
     tcp_port: Option<String>,
     udp_port: Option<String>,
     mate_data: MetaData,
 }
+impl RegisterInfo {
+    pub fn new(tag: String) -> Self {
+        RegisterInfo {
+            tag,
+            tcp_port: Default::default(),
+            udp_port: Default::default(),
+            mate_data: Default::default(),
+        }
+    }
 
-pub struct Data {
-    target_port: u16,
-    bytes: Vec<u8>,
+    pub fn get_tag(&self) -> &str {
+        &self.tag
+    }
 }
 
-impl Debug for Data {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Data")
-            .field("target_port", &self.target_port)
-            .field("bytes", &"...")
-            .finish()
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConnectionInfo {
+    source_tag: String,
+    target_tag: String,
+    target_host: String,
+}
+
+impl ConnectionInfo {
+    pub fn new(source_tag: String, target_tag: String, target_host: String) -> Self {
+        ConnectionInfo {
+            source_tag,
+            target_tag,
+            target_host,
+        }
+    }
+
+    pub fn get_target_tag(&self) -> &str {
+        return &self.target_tag;
+    }
+    pub fn get_source_tag(&self) -> &str {
+        return &self.source_tag;
+    }
+    pub fn get_target_host(&self) -> &str {
+        return &self.target_host;
     }
 }
 
@@ -36,8 +63,11 @@ impl Debug for Data {
 pub enum Frame {
     Ping,
     Ack,
+    KeepAlive,
     Register(RegisterInfo),
-    SendFrame(Data),
+    Connection(ConnectionInfo),
+    TargetConnection(ConnectionInfo),
+    TargetBuffer(Buffer),
 }
 
 impl Frame {
@@ -46,43 +76,44 @@ impl Frame {
         if first != b'0' {
             return Err(Error::Other("parse verify error".into()));
         }
-        let start = bytes.position() as usize + 1;
+        let start = bytes.position() as usize;
         let buf = bytes.get_ref();
-        let end = buf.len() as usize - 1;
-        if start == end {
+        let end = buf.len() as usize;
+        if start + 1 > end {
             return Err(Error::Incomplete);
         }
         let lenght: usize = get_u16(buf, start) as usize;
-        if end - start - 1 < lenght {
+        if start + lenght + 2 > end {
             return Err(Error::Incomplete);
         }
         let start = start + 2;
         let buf = &buf[start..start + lenght];
-        match buf[0] {
-            b'*' => {
-                let target_port = get_u16(buf, 1);
-                let bytes = buf[3..].to_vec();
-                Frame::SendFrame(Data { target_port, bytes })
-            }
+        bytes.set_position((start + lenght) as u64);
+        let frame = match buf[0] {
+            b'*' => Frame::Connection(serde_json::from_slice(&buf[1..])?),
+            b'&' => Frame::TargetConnection(serde_json::from_slice(&buf[1..])?),
             b'!' => match buf[1..buf.len()].as_ref() {
                 b"ping" => Frame::Ping,
+                b"keepalive" => Frame::KeepAlive,
                 _ => Frame::Ack,
             },
             b'+' => Frame::Register(serde_json::from_slice(&buf[1..])?),
             _ => return Err(Error::Other("parse error".into())),
         };
-
-        todo!()
+        Ok(frame)
     }
 
     pub fn serialization(&self) -> Result<Vec<u8>, crate::Error> {
         let mut bytes = vec![];
         bytes.extend_from_slice(b"000");
         match self {
-            Frame::SendFrame(data) => {
+            Frame::Connection(connection_info) => {
                 bytes.push(b'*');
-                bytes.extend_from_slice(&u16_to_u8(data.target_port));
-                bytes.extend_from_slice(&data.bytes);
+                bytes.extend_from_slice(serde_json::to_string(connection_info)?.as_bytes());
+            }
+            Frame::TargetConnection(connection_info) => {
+                bytes.push(b'&');
+                bytes.extend_from_slice(serde_json::to_string(connection_info)?.as_bytes());
             }
             Frame::Ping => {
                 bytes.push(b'!');
@@ -92,12 +123,19 @@ impl Frame {
                 bytes.push(b'!');
                 bytes.extend_from_slice(b"ack");
             }
+            Frame::KeepAlive => {
+                bytes.push(b'!');
+                bytes.extend_from_slice(b"keepalive");
+            }
             Frame::Register(register_info) => {
                 bytes.push(b'+');
                 bytes.extend_from_slice(serde_json::to_string(register_info)?.as_bytes());
             }
+            _ => return Err("serialization error".into()),
         }
-        bytes.extend_from_slice(b"\r\n");
+        let length = (bytes.len() - 3) as u16;
+        bytes[1] = (length >> 8) as u8;
+        bytes[2] = length as u8;
         Ok(bytes)
     }
 }

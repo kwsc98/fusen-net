@@ -19,7 +19,12 @@ async fn main() {
     //     error!("port must set");
     //     return;
     // };
-    let err = client::Client::register("127.0.0.1:8089".to_owned(), "testtest".to_owned()).await;
+    let err = client::Client::agent(
+        "127.0.0.1:8089".to_owned(),
+        "testtest".to_owned(),
+        "0.0.0.0:8081".to_owned(),
+        "8078".to_owned(),
+    ).await;
     info!("{:?}", err);
 }
 
