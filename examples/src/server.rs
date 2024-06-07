@@ -13,6 +13,6 @@ async fn main() {
 
 #[derive(StructOpt)]
 struct Cli {
-    #[structopt(short, long)]
+    #[structopt(short = "p", long = "port")]
     port: Option<String>,
 }
