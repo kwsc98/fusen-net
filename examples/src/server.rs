@@ -2,7 +2,7 @@ use examples::init_log;
 use fusen_net::server;
 use structopt::StructOpt;
 
-#[tokio::main(worker_threads = 2)]
+#[tokio::main(worker_threads = 512)]
 async fn main() {
     init_log();
     let cli = Cli::from_args();
