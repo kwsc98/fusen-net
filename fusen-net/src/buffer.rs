@@ -22,10 +22,10 @@ impl Debug for Buffer {
 
 impl Buffer {
     pub fn new(socket: TcpStream) -> Self {
-        return Buffer {
+        Buffer {
             stream: BufWriter::new(socket),
             buffer: BytesMut::with_capacity(4 * 1024),
-        };
+        }
     }
 
     pub async fn read_buf(&mut self) -> Result<&BytesMut, crate::Error> {

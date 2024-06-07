@@ -49,13 +49,13 @@ impl ConnectionInfo {
     }
 
     pub fn get_target_tag(&self) -> &str {
-        return &self.target_tag;
+        &self.target_tag
     }
     pub fn get_source_tag(&self) -> &str {
-        return &self.source_tag;
+        &self.source_tag
     }
     pub fn get_target_host(&self) -> &str {
-        return &self.target_host;
+        &self.target_host
     }
 }
 
@@ -78,7 +78,7 @@ impl Frame {
         }
         let start = bytes.position() as usize;
         let buf = bytes.get_ref();
-        let end = buf.len() as usize;
+        let end = buf.len();
         if start + 1 > end {
             return Err(Error::Incomplete);
         }
@@ -144,18 +144,18 @@ fn pop_first_u8(src: &mut Cursor<&[u8]>) -> Result<u8, Error> {
     if !src.has_remaining() {
         return Err(Error::Incomplete);
     }
-    return Ok(src.get_u8());
+    Ok(src.get_u8())
 }
 
 impl From<FromUtf8Error> for Error {
     fn from(_src: FromUtf8Error) -> Error {
-        return Error::Other("protocol error; invalid frame format".into());
+        Error::Other("protocol error; invalid frame format".into())
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Error {
-        return Error::Other(format!("json serialize err : {}", error.to_string()).into());
+        Error::Other(format!("json serialize err : {}", error).into())
     }
 }
 

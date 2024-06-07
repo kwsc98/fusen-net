@@ -65,7 +65,7 @@ impl Channel {
                     match frame {
                         frame::Frame::Register(register_info) => {
                             let channel_info = Arc::new(ChannelInfo {
-                                _net_addr: socket_addr.clone(),
+                                _net_addr: socket_addr,
                                 register_info,
                                 sender: sender.clone(),
                             });
@@ -81,7 +81,7 @@ impl Channel {
                             tokio::spawn(async move {
                                 loop {
                                     tokio::time::sleep(Duration::from_secs(5)).await;
-                                    if let Err(_) = channel_info.sender.send(Frame::Ping) {
+                                    if channel_info.sender.send(Frame::Ping).is_err() {
                                         info!("register conn close : {:?}", channel_info);
                                         break;
                                     }
@@ -97,7 +97,7 @@ impl Channel {
                                 .await?
                                 .ok_or(format!("not find : {:?}", connection_info))?;
                             let channel_info = Arc::new(ChannelInfo {
-                                _net_addr: socket_addr.clone(),
+                                _net_addr: socket_addr,
                                 register_info: Default::default(),
                                 sender: sender.clone(),
                             });
@@ -109,13 +109,9 @@ impl Channel {
                                 .await;
                             tokio::spawn(async move {
                                 let tag = connection_info.get_source_tag().to_owned();
-                                let _ = handler(
-                                    connection_info,
-                                    buffer,
-                                    target_channel_info,
-                                    receiver,
-                                )
-                                .await;
+                                let _ =
+                                    handler(connection_info, buffer, target_channel_info, receiver)
+                                        .await;
                                 let _ = async_cache.remove(tag).await;
                             });
                             return Ok(());

@@ -27,7 +27,6 @@ impl Client {
                     let _ = buffer.write_frame(&Frame::Ack).await;
                 }
                 Frame::Connection(connection) => {
-                    let host = host.clone();
                     tokio::spawn(async move {
                         let tcp_stream = TcpStream::connect(connection.get_target_host())
                             .await

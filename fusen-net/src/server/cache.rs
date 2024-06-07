@@ -5,22 +5,24 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::oneshot;
 
 enum CacheSender<K, V> {
-    GET(K),
-    INSERT((K, V)),
-    REMOVE(K),
+    Get(K),
+    Insert((K, V)),
+    Remove(K),
 }
 
 enum CacheReceiver<V> {
-    GET(Option<V>),
-    INSERT(Option<V>),
-    REMOVE(Option<V>),
+    Get(Option<V>),
+    Insert(Option<V>),
+    Remove(Option<V>),
 }
+type AsyncCacheSender<K, V> =
+    UnboundedSender<(CacheSender<K, V>, oneshot::Sender<CacheReceiver<V>>)>;
 
 #[derive(Clone)]
 pub struct AsyncCache<K, V> {
     _k: PhantomData<K>,
     _v: PhantomData<V>,
-    sender: UnboundedSender<(CacheSender<K, V>, oneshot::Sender<CacheReceiver<V>>)>,
+    sender: AsyncCacheSender<K, V>,
 }
 
 impl<K, V> AsyncCache<K, V>
@@ -35,16 +37,16 @@ where
             let mut map = HashMap::<K, V>::new();
             while let Some(msg) = receiver.recv().await {
                 match msg.0 {
-                    CacheSender::GET(key) => {
-                        let _ = msg.1.send(CacheReceiver::GET(map.get(&key).cloned()));
+                    CacheSender::Get(key) => {
+                        let _ = msg.1.send(CacheReceiver::Get(map.get(&key).cloned()));
                     }
-                    CacheSender::INSERT((key, value)) => {
+                    CacheSender::Insert((key, value)) => {
                         let value = map.insert(key, value);
-                        let _ = msg.1.send(CacheReceiver::INSERT(value));
+                        let _ = msg.1.send(CacheReceiver::Insert(value));
                     }
-                    CacheSender::REMOVE(key) => {
+                    CacheSender::Remove(key) => {
                         let value = map.remove(&key);
-                        let _ = msg.1.send(CacheReceiver::REMOVE(value));
+                        let _ = msg.1.send(CacheReceiver::Remove(value));
                     }
                 }
             }
@@ -58,9 +60,9 @@ where
 
     pub async fn get(&self, key: K) -> Result<Option<V>, crate::Error> {
         let oneshot = oneshot::channel();
-        let _ = self.sender.send((CacheSender::GET(key), oneshot.0));
+        let _ = self.sender.send((CacheSender::Get(key), oneshot.0));
         match oneshot.1.await? {
-            CacheReceiver::GET(value) => Ok(value),
+            CacheReceiver::Get(value) => Ok(value),
             _ => Err("err receiver".into()),
         }
     }
@@ -69,18 +71,18 @@ where
         let oneshot = oneshot::channel();
         let _ = self
             .sender
-            .send((CacheSender::INSERT((key, value)), oneshot.0));
+            .send((CacheSender::Insert((key, value)), oneshot.0));
         match oneshot.1.await? {
-            CacheReceiver::INSERT(value) => Ok(value),
+            CacheReceiver::Insert(value) => Ok(value),
             _ => Err("err receiver".into()),
         }
     }
 
     pub async fn remove(&self, key: K) -> Result<Option<V>, crate::Error> {
         let oneshot = oneshot::channel();
-        let _ = self.sender.send((CacheSender::REMOVE(key), oneshot.0));
+        let _ = self.sender.send((CacheSender::Remove(key), oneshot.0));
         match oneshot.1.await? {
-            CacheReceiver::REMOVE(value) => Ok(value),
+            CacheReceiver::Remove(value) => Ok(value),
             _ => Err("err receiver".into()),
         }
     }
