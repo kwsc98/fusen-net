@@ -27,7 +27,7 @@ async fn main() {
         let server_host = server_host.clone();
         let send = send.clone();
         tokio::spawn(async move {
-            let agent_info: Vec<&str> = item.split(':').collect();
+            let agent_info: Vec<&str> = item.split('-').collect();
             info!(
                 "start agent target_tag : {}  target_host : {} , local_port : {}",
                 agent_info[0], agent_info[1], agent_info[2]

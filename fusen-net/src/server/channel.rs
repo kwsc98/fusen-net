@@ -83,12 +83,12 @@ impl Channel {
                                     tokio::time::sleep(Duration::from_secs(5)).await;
                                     if channel_info.sender.send(Frame::Ping).is_err() {
                                         info!("register conn close : {:?}", channel_info);
+                                        let _ = async_cache_clone
+                                            .remove(channel_info.register_info.get_tag().to_owned())
+                                            .await;
                                         break;
                                     }
                                 }
-                                let _ = async_cache_clone
-                                    .remove(channel_info.register_info.get_tag().to_owned())
-                                    .await;
                             });
                         }
                         frame::Frame::Connection(connection_info) => {

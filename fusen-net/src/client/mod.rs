@@ -28,6 +28,7 @@ impl Client {
                 }
                 Frame::Connection(connection) => {
                     tokio::spawn(async move {
+                        info!("start connection : {:?}", connection);
                         let tcp_stream = TcpStream::connect(connection.get_target_host())
                             .await
                             .unwrap();
