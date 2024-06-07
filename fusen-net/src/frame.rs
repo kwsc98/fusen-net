@@ -79,7 +79,7 @@ impl Frame {
         let start = bytes.position() as usize;
         let buf = bytes.get_ref();
         let end = buf.len();
-        if start + 1 > end {
+        if start + 1 >= end {
             return Err(Error::Incomplete);
         }
         let lenght: usize = get_u16(buf, start) as usize;
