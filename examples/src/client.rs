@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use examples::init_log;
-use fusen_net::client;
+use fusen_net::{client, shutdown::ShutdownV2};
 use structopt::StructOpt;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -12,20 +14,26 @@ async fn main() {
         error!("server_host must set");
         return;
     };
-    let (send, mut recv) = mpsc::channel(1);
     if let Some(tag) = cli.tag {
         let server_host = server_host.clone();
-        let send = send.clone();
+        let mut shutdown = ShutdownV2::default();
         tokio::spawn(async move {
-            let err = client::Client::register(server_host, tag).await;
-            info!("{:?}", err);
-            drop(send)
+            loop {
+                let res = tokio::select! {
+                    res = client::Client::register(server_host.clone(), tag.clone()) => res,
+                    _ = shutdown.recv() => {
+                        info!("shutdown");
+                        return;
+                    }
+                };
+                let _ = tokio::time::sleep(Duration::from_secs(10)).await;
+                info!("error : {:?} , try register again",res);
+            }
         });
     }
-
+  
     for item in cli.agent {
         let server_host = server_host.clone();
-        let send = send.clone();
         tokio::spawn(async move {
             let agent_info: Vec<&str> = item.split('-').collect();
             info!(
@@ -40,9 +48,9 @@ async fn main() {
             )
             .await;
             info!("{:?}", err);
-            drop(send)
         });
     }
+    let (_send, mut recv) = mpsc::channel(1);
     let _: Option<i32> = recv.recv().await;
 }
 
