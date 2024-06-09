@@ -14,24 +14,28 @@ async fn main() {
         error!("server_host must set");
         return;
     };
-    if let Some(tag) = cli.tag {
-        let server_host = server_host.clone();
-        let mut shutdown = ShutdownV2::default();
-        tokio::spawn(async move {
-            loop {
-                let res = tokio::select! {
-                    res = client::Client::register(server_host.clone(), tag.clone()) => res,
-                    _ = shutdown.recv() => {
-                        info!("shutdown");
-                        return;
-                    }
-                };
-                let _ = tokio::time::sleep(Duration::from_secs(10)).await;
-                info!("error : {:?} , try register again",res);
-            }
-        });
-    }
-  
+    let Some(tag) = cli.tag else {
+        error!("tag must set");
+        return;
+    };
+    let (send, mut recv) = mpsc::channel(1);
+    let server_host_clone = server_host.clone();
+    let mut shutdown = ShutdownV2::default();
+    let send_clone = send.clone();
+    tokio::spawn(async move {
+        loop {
+            let res = tokio::select! {
+                res = client::Client::register(server_host_clone.clone(), tag.clone()) => res,
+                _ = shutdown.recv() => {
+                    info!("shutdown");
+                    break;
+                }
+            };
+            let _ = tokio::time::sleep(Duration::from_secs(10)).await;
+            info!("error : {:?} , try register again", res);
+        }
+        drop(send_clone);
+    });
     for item in cli.agent {
         let server_host = server_host.clone();
         tokio::spawn(async move {
@@ -50,7 +54,7 @@ async fn main() {
             info!("{:?}", err);
         });
     }
-    let (_send, mut recv) = mpsc::channel(1);
+    drop(send);
     let _: Option<i32> = recv.recv().await;
 }
 
