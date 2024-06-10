@@ -49,3 +49,17 @@ cd ../fusen-net/target/release/
 ```
 
 Server与agent启动后，TcpClient就可以调用本地的127.0.0.1:8078端口，来对TcpServer暴露的0.0.0.0:8081端口进行内网穿透调用。
+
+# Docker
+本项目也支持Docker镜像部署方式
+
+```rust
+//server
+docker run --name fusen-net-server -p 8089:8089 kwsc98/fusen-net-server:latest
+
+//Client-agent1
+docker run --name fusen-net-agent1 -e SERVER_HOST=120.46.75.13:8089 -e TAG=agent1 kwsc98/fusen-net-client:latest
+
+//Client-agent2
+docker run --name fusen-net-agent2 -e SERVER_HOST=120.46.75.13:8089 -e TAG=agent2 -e AGENTS=agent1-0.0.0.0:8081-8078,agent1-0.0.0.0:8082-8079 -p 8078:8078 -p 8079:8079 kwsc98/fusen-net-client:latest
+```

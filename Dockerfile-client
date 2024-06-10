@@ -1,0 +1,14 @@
+FROM rust:alpine AS builder
+WORKDIR /code/fusen-net
+COPY . .
+RUN apk add --no-cache -U musl-dev
+RUN cargo build --release
+ 
+
+FROM alpine
+WORKDIR /opt/fusen-net
+COPY --from=builder /code/fusen-net/target/release/client .
+RUN apk add --no-cache -U libgcc
+
+
+ENTRYPOINT ["sh", "-c", "./client --server_host $SERVER_HOST --tag $TAG $(for agent in $(echo $AGENTS | tr ',' ' '); do echo \"--agent $agent\"; done)"]
