@@ -12,6 +12,9 @@ path = "src/client.rs"
 [[bin]]
 name = "server"
 path = "src/server.rs"
+[[bin]]
+name = "test"
+path = "src/test.rs"
 
 
 [dependencies]

@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use examples::init_log;
-use fusen_net::{client, shutdown::ShutdownV2};
+use fusen_net::{
+    client::{self, AgentInfo},
+    shutdown::ShutdownV2,
+};
 use structopt::StructOpt;
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -25,7 +28,7 @@ async fn main() {
     tokio::spawn(async move {
         loop {
             let res = tokio::select! {
-                res = client::Client::register(server_host_clone.clone(), tag.clone()) => res,
+                res = client::register(server_host_clone.clone(), tag.clone()) => res,
                 _ = shutdown.recv() => {
                     info!("shutdown");
                     break;
@@ -41,16 +44,10 @@ async fn main() {
         tokio::spawn(async move {
             let agent_info: Vec<&str> = item.split('-').collect();
             info!(
-                "start agent target_tag : {}  target_host : {} , local_port : {}",
-                agent_info[0], agent_info[1], agent_info[2]
+                "start agent mode {} target_tag : {}  target_host : {} , local_port : {}",
+                agent_info[0], agent_info[1], agent_info[2], agent_info[3]
             );
-            let err = client::Client::agent(
-                server_host,
-                agent_info[0].to_owned(),
-                agent_info[1].to_owned(),
-                agent_info[2].to_owned(),
-            )
-            .await;
+            let err = client::agent(server_host, AgentInfo::from(item.as_str())).await;
             info!("{:?}", err);
         });
     }

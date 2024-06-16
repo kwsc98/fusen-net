@@ -6,11 +6,16 @@ edition.workspace = true
 license.workspace = true
 description.workspace = true
 
+
 [dependencies]
 #网络协议处理
 tokio.workspace = true
 bytes.workspace = true
 futures.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+libc.workspace = true
 
 
 #日志处理
@@ -24,3 +29,4 @@ serde.workspace = true
 serde_json.workspace = true
 
 uuid.workspace = true
+

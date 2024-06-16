@@ -1,8 +1,7 @@
+use crate::{buffer::QuicBuffer, client::AgentMode, MetaData};
 use bytes::Buf;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, io::Cursor, string::FromUtf8Error};
-
-use crate::{buffer::Buffer, MetaData};
 
 #[derive(Debug)]
 pub enum Error {
@@ -12,14 +11,16 @@ pub enum Error {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RegisterInfo {
+    server_host: String,
     tag: String,
     tcp_port: Option<String>,
     udp_port: Option<String>,
     mate_data: MetaData,
 }
 impl RegisterInfo {
-    pub fn new(tag: String) -> Self {
+    pub fn new(server_host: String, tag: String) -> Self {
         RegisterInfo {
+            server_host,
             tag,
             tcp_port: Default::default(),
             udp_port: Default::default(),
@@ -34,18 +35,52 @@ impl RegisterInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionInfo {
+    pub agent_mode: AgentMode,
     source_tag: String,
     target_tag: String,
     target_host: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubscribeInfo {
+    target_tag: String,
+    target_sockeraddr: Option<String>,
+}
+
+impl SubscribeInfo {
+    pub fn new(target_tag: String) -> Self {
+        SubscribeInfo {
+            target_tag,
+            target_sockeraddr: None,
+        }
+    }
+    pub fn get_target_tag(&self) -> &str {
+        &self.target_tag
+    }
+    pub fn get_target_sockeraddr(&self) -> Option<&str> {
+        self.target_sockeraddr.as_deref()
+    }
+    pub fn set_target_sockeraddr(&mut self, target_sockeraddr: Option<String>) {
+        self.target_sockeraddr = target_sockeraddr;
+    }
+}
+
 impl ConnectionInfo {
-    pub fn new(source_tag: String, target_tag: String, target_host: String) -> Self {
+    pub fn new(
+        agent_mode: AgentMode,
+        source_tag: String,
+        target_tag: String,
+        target_host: String,
+    ) -> Self {
         ConnectionInfo {
+            agent_mode,
             source_tag,
             target_tag,
             target_host,
         }
+    }
+    pub fn get_agent_mode(&self) -> &AgentMode {
+        &self.agent_mode
     }
 
     pub fn get_target_tag(&self) -> &str {
@@ -67,7 +102,8 @@ pub enum Frame {
     Register(RegisterInfo),
     Connection(ConnectionInfo),
     TargetConnection(ConnectionInfo),
-    TargetBuffer(Buffer),
+    Subscribe(SubscribeInfo),
+    TargetBuffer(QuicBuffer),
 }
 
 impl Frame {
@@ -92,6 +128,7 @@ impl Frame {
         let frame = match buf[0] {
             b'*' => Frame::Connection(serde_json::from_slice(&buf[1..])?),
             b'&' => Frame::TargetConnection(serde_json::from_slice(&buf[1..])?),
+            b'^' => Frame::Subscribe(serde_json::from_slice(&buf[1..])?),
             b'!' => match buf[1..buf.len()].as_ref() {
                 b"ping" => Frame::Ping,
                 b"keepalive" => Frame::KeepAlive,
@@ -109,6 +146,10 @@ impl Frame {
         match self {
             Frame::Connection(connection_info) => {
                 bytes.push(b'*');
+                bytes.extend_from_slice(serde_json::to_string(connection_info)?.as_bytes());
+            }
+            Frame::Subscribe(connection_info) => {
+                bytes.push(b'^');
                 bytes.extend_from_slice(serde_json::to_string(connection_info)?.as_bytes());
             }
             Frame::TargetConnection(connection_info) => {

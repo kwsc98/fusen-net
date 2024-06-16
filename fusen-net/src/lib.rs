@@ -11,7 +11,14 @@ pub mod frame;
 pub mod server;
 pub mod shutdown;
 pub mod socket;
+pub mod quic;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type FusenFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+#[derive(Debug)]
+pub struct ServerInfo{
+   server_host : String
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MetaData {
@@ -26,19 +33,19 @@ pub enum Protocol {
 
 #[derive(Clone, Debug)]
 pub struct ChannelInfo {
-    _net_addr: SocketAddr,
+    net_addr: SocketAddr,
     register_info: RegisterInfo,
     sender: UnboundedSender<Frame>,
 }
 
 impl ChannelInfo {
     pub fn new(
-        _net_addr: SocketAddr,
+        net_addr: SocketAddr,
         register_info: RegisterInfo,
         sender: UnboundedSender<Frame>,
     ) -> Self {
         Self {
-            _net_addr,
+            net_addr,
             register_info,
             sender,
         }
