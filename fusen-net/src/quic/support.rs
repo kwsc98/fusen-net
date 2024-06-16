@@ -16,24 +16,9 @@ pub fn make_client_endpoint(
     bind_addr: SocketAddr,
     server_certs: &[&[u8]],
 ) -> Result<Endpoint, crate::Error> {
-    let mut socket = std::net::UdpSocket::bind(bind_addr)?;
-    // 设置端口复用
-    let socket_raw_fd = socket.as_raw_fd();
-    let enable = 1;
-    unsafe {
-        // 调用系统API设置SO_REUSEPORT
-        libc::setsockopt(
-            socket_raw_fd,
-            libc::SOL_SOCKET,
-            libc::SO_REUSEPORT,
-            &enable as *const _ as *const libc::c_void,
-            std::mem::size_of_val(&enable) as libc::socklen_t,
-        );
-    }
-    let runtime = default_runtime()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no async runtime found"))?;
-    Endpoint::new(EndpointConfig::default(), None, socket, runtime)
-        .map_err(|error| format!("make_client_endpoint error : {:?}", error).into())
+    let client_cfg = configure_client(server_certs)?;
+    let mut endpoint = Endpoint::client(bind_addr)?;
+    Ok(endpoint)
 }
 
 /// Constructs a QUIC endpoint configured to listen for incoming connections on a certain address
@@ -46,28 +31,7 @@ pub fn make_client_endpoint(
 #[allow(unused)]
 pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), crate::Error> {
     let (server_config, server_cert) = configure_server()?;
-    let mut socket = std::net::UdpSocket::bind(bind_addr)?;
-    // 设置端口复用
-    let socket_raw_fd = socket.as_raw_fd();
-    let enable = 1;
-    unsafe {
-        // 调用系统API设置SO_REUSEPORT
-        libc::setsockopt(
-            socket_raw_fd,
-            libc::SOL_SOCKET,
-            libc::SO_REUSEPORT,
-            &enable as *const _ as *const libc::c_void,
-            std::mem::size_of_val(&enable) as libc::socklen_t,
-        );
-    }
-    let runtime = default_runtime()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "no async runtime found"))?;
-    let endpoint = Endpoint::new(
-        EndpointConfig::default(),
-        Some(server_config),
-        socket,
-        runtime,
-    )?;
+    let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok((endpoint, server_cert))
 }
 

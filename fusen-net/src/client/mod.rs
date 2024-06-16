@@ -59,7 +59,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
     };
     drop(quic_buffer);
     tokio::time::sleep(Duration::from_secs(1)).await;
-    let server_endpoint = make_server_endpoint(local_addr).unwrap().0;
+    let server_endpoint = make_server_endpoint(format!("0.0.0.0:{}",local_addr.port()).parse().unwrap()).unwrap().0;
     while let Some(connecting) = server_endpoint.accept().await {
         tokio::spawn(async move {
             let Ok(connection) = connecting.await else {
