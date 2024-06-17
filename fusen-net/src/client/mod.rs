@@ -60,6 +60,29 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
         res = quic_buffer.read_frame() => res?,
         _ = tokio::time::sleep(Duration::from_secs(3)) => return Err("register time out".into()),
     };
+    tokio::spawn(async move {
+        while let Ok(frame) = quic_buffer.read_frame().await {
+            info!("rev frame2 : {:?}", frame);
+            if let Frame::Connection(connection) = frame {
+                tokio::spawn(async move {
+                    info!("start rm connection : {:?}", connection);
+                    let tcp_stream = TcpStream::connect(connection.get_target_host())
+                        .await
+                        .unwrap();
+                    let buffer = TcpBuffer::new(tcp_stream);
+                    let (mut quic_buffer, _) = quic::connect(host).await.unwrap();
+                    let _ = quic_buffer
+                        .write_frame(&Frame::TargetConnection(connection))
+                        .await;
+                    let _frame = tokio::select! {
+                        res = quic_buffer.read_frame() => res.unwrap(),
+                        _ = tokio::time::sleep(Duration::from_secs(3)) => panic!("connect time out"),
+                    };
+                    let _ = connection::connect_tcp_to_quic(buffer, quic_buffer).await;
+                });
+            }
+        }
+    });
     while let Some(connecting) = server_endpoint.accept().await {
         tokio::spawn(async move {
             let Ok(connection) = connecting.await else {
@@ -71,6 +94,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
                 .expect("connection accept_bi err");
             let mut quic_buffer = QuicBuffer::new(send_stream, recv_stream);
             while let Ok(frame) = quic_buffer.read_frame().await {
+                info!("rev frame : {:?}", frame);
                 match frame {
                     Frame::Ping => {
                         let _ = quic_buffer.write_frame(&Frame::Ack).await;

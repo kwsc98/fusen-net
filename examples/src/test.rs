@@ -23,7 +23,7 @@ async fn main() {
     tokio::spawn(async move {
         let error = client::agent(
             "127.0.0.1:8089".to_owned(),
-            AgentInfo::from("DM-agent1-127.0.0.1:8081-8078"),
+            AgentInfo::from("RM-agent1-127.0.0.1:8081-8078"),
         )
         .await;
         println!("error2 -- {:?}", error);

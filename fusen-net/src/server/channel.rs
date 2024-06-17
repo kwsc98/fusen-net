@@ -162,7 +162,7 @@ impl Channel {
                             return Ok(());
                         }
                         frame::Frame::Ping => {
-                            let _ = buffer.write_frame(&frame::Frame::Ack).await;
+                            let _ = buffer.write_frame(&frame::Frame::Ack).await?;
                         }
                         _ => (),
                     }
