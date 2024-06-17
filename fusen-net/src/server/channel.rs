@@ -78,12 +78,12 @@ impl Channel {
                                     channel_info.clone(),
                                 )
                                 .await;
-                            let Ok((quic_buffer, _addr)) =
-                                quic::connect(channel_info.net_addr.clone()).await
-                            else {
-                                return Err("connect error".into());
-                            };
-                            buffer = quic_buffer;
+                            // let Ok((quic_buffer, _addr)) =
+                            //     quic::connect(channel_info.net_addr.clone()).await
+                            // else {
+                            //     return Err("connect error".into());
+                            // };
+                            // buffer = quic_buffer;
                             let async_cache_clone = async_cache.clone();
                             //KeepAlive
                             tokio::spawn(async move {

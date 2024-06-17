@@ -48,8 +48,11 @@ impl Into<AgentMode> for &str {
 }
 
 pub async fn register(register_addr: String, tag: String) -> Result<(), crate::Error> {
+    let mut server_endpoint = make_server_endpoint(format!("0.0.0.0:0").parse().unwrap())
+        .unwrap()
+        .0;
     let host: SocketAddr = register_addr.parse().unwrap();
-    let (mut quic_buffer, local_addr) = quic::connect(host).await?;
+    let (mut quic_buffer, _local_addr) = quic::connect_reuse(&mut server_endpoint, host).await?;
     let _ = quic_buffer
         .write_frame(&Frame::Register(RegisterInfo::new(register_addr, tag)))
         .await;
@@ -57,9 +60,6 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
         res = quic_buffer.read_frame() => res?,
         _ = tokio::time::sleep(Duration::from_secs(3)) => return Err("register time out".into()),
     };
-    drop(quic_buffer);
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    let server_endpoint = make_server_endpoint(format!("0.0.0.0:{}",local_addr.port()).parse().unwrap()).unwrap().0;
     while let Some(connecting) = server_endpoint.accept().await {
         tokio::spawn(async move {
             let Ok(connection) = connecting.await else {
