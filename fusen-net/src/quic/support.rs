@@ -1,10 +1,7 @@
 //! Commonly used code in most examples.
 
-use quinn::{default_runtime, ClientConfig, Endpoint, EndpointConfig, ServerConfig};
-use std::net::TcpListener;
-use std::os::unix::io::AsRawFd;
+use quinn::{ClientConfig, Endpoint, ServerConfig};
 use std::{net::SocketAddr, sync::Arc};
-use tokio::io;
 
 /// Constructs a QUIC endpoint configured for use a client only.
 ///

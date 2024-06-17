@@ -1,9 +1,6 @@
 use crate::buffer::QuicBuffer;
 use quinn::{ClientConfig, Endpoint};
-use std::{
-    net::{SocketAddr, UdpSocket},
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 use support::make_client_endpoint;
 pub mod support;
 

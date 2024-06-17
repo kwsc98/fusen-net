@@ -13,6 +13,7 @@ async fn main() {
     let server = server::Server::new("8089");
     tokio::spawn(async move {
         let _ = server.start().await;
+        println!("server end");
     });
     tokio::time::sleep(Duration::from_secs(1)).await;
     tokio::spawn(async move {

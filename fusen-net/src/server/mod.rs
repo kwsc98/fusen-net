@@ -5,9 +5,9 @@ use cache::AsyncCache;
 use channel::Channel;
 use std::sync::Arc;
 use tokio::signal;
-use tokio::sync::broadcast::{error, Sender};
+use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{debug, info};
 pub mod cache;
 mod channel;
 
@@ -42,11 +42,11 @@ impl Server {
                     let shutdown_complete_tx_clone = shutdown_complete_tx.clone();
                     let notify_shutdown = notify_shutdown.subscribe();
                     tokio::spawn(async move {
-                        info!("connect udpStream : {:?}", incoming);
+                        debug!("connect udpStream : {:?}", incoming);
                         let connection = match incoming.await {
                             Ok(connection) => connection,
                             Err(error) => {
-                                error!("erro : {:?}", error);
+                                info!("erro : {:?}", error);
                                 return;
                             }
                         };
@@ -59,10 +59,10 @@ impl Server {
                             Shutdown::new(notify_shutdown),
                         );
                         let error = channel.run().await;
-                        info!("udp_stream end : {:?}", error);
+                        debug!("udp_stream end : {:?}", error);
                     });
                 }
-                None => error!("udp connect, err"),
+                None => info!("udp connect, err"),
             }
         }
     }

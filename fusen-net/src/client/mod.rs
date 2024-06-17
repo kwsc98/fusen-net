@@ -4,12 +4,11 @@ use crate::frame::{ConnectionInfo, Frame, RegisterInfo, SubscribeInfo};
 use crate::quic::support::make_server_endpoint;
 use crate::server::cache::AsyncCache;
 use crate::{connection, quic};
-use quinn::Endpoint;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tracing::info;
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct AgentInfo {
@@ -37,9 +36,9 @@ pub enum AgentMode {
     RM,
 }
 
-impl Into<AgentMode> for &str {
-    fn into(self) -> AgentMode {
-        if self.to_uppercase().contains("DM") {
+impl From<&str> for AgentMode {
+    fn from(val: &str) -> Self {
+        if val.to_uppercase().contains("DM") {
             AgentMode::DM
         } else {
             AgentMode::RM
@@ -48,7 +47,7 @@ impl Into<AgentMode> for &str {
 }
 
 pub async fn register(register_addr: String, tag: String) -> Result<(), crate::Error> {
-    let mut server_endpoint = make_server_endpoint(format!("0.0.0.0:0").parse().unwrap())
+    let mut server_endpoint = make_server_endpoint("0.0.0.0:0".to_string().parse().unwrap())
         .unwrap()
         .0;
     let host: SocketAddr = register_addr.parse().unwrap();
@@ -62,10 +61,10 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
     };
     tokio::spawn(async move {
         while let Ok(frame) = quic_buffer.read_frame().await {
-            info!("rev frame2 : {:?}", frame);
+            debug!("rev frame2 : {:?}", frame);
             if let Frame::Connection(connection) = frame {
                 tokio::spawn(async move {
-                    info!("start rm connection : {:?}", connection);
+                    debug!("start rm connection : {:?}", connection);
                     let tcp_stream = TcpStream::connect(connection.get_target_host())
                         .await
                         .unwrap();
@@ -94,7 +93,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
                 .expect("connection accept_bi err");
             let mut quic_buffer = QuicBuffer::new(send_stream, recv_stream);
             while let Ok(frame) = quic_buffer.read_frame().await {
-                info!("rev frame : {:?}", frame);
+                debug!("rev frame : {:?}", frame);
                 match frame {
                     Frame::Ping => {
                         let _ = quic_buffer.write_frame(&Frame::Ack).await;
@@ -102,7 +101,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
                     Frame::Connection(connection) => {
                         match connection.get_agent_mode() {
                             AgentMode::DM => {
-                                info!("start dm connection : {:?}", connection);
+                                debug!("start dm connection : {:?}", connection);
                                 let tcp_stream = TcpStream::connect(connection.get_target_host())
                                     .await
                                     .unwrap();
@@ -115,7 +114,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
                                 return;
                             }
                             AgentMode::RM => tokio::spawn(async move {
-                                info!("start rm connection : {:?}", connection);
+                                debug!("start rm connection : {:?}", connection);
                                 let tcp_stream = TcpStream::connect(connection.get_target_host())
                                     .await
                                     .unwrap();
@@ -132,7 +131,7 @@ pub async fn register(register_addr: String, tag: String) -> Result<(), crate::E
                             }),
                         };
                     }
-                    frame => info!("rev not support frame : {:?}", frame),
+                    frame => debug!("rev not support frame : {:?}", frame),
                 }
             }
         });
@@ -153,7 +152,7 @@ async fn dm_handler(register_addr: String, agent_info: AgentInfo) -> Result<(), 
     let host: SocketAddr = register_addr_clone.parse().unwrap();
     let (mut quic_buffer, _) = quic::connect(host).await.expect("udp connect error");
     let _ = quic_buffer
-        .write_frame(&&Frame::Subscribe(SubscribeInfo::new(
+        .write_frame(&Frame::Subscribe(SubscribeInfo::new(
             agent_info.target_tag.clone(),
         )))
         .await;
@@ -186,11 +185,11 @@ async fn dm_handler(register_addr: String, agent_info: AgentInfo) -> Result<(), 
         tokio::spawn(async move {
             let tcp_buffer = TcpBuffer::new(tcp_stream.0);
             let Ok(Some(addr)) = async_cache_clone.get(agent_info.target_tag.clone()).await else {
-                info!("not find addr");
+                debug!("not find addr");
                 return;
             };
             let host: SocketAddr = addr.parse().unwrap();
-            info!("{:?}", host);
+            debug!("{:?}", host);
             let (mut quic_buffer, _) = quic::connect(host).await.expect("udp connect error");
             let _ = quic_buffer
                 .write_frame(&Frame::Connection(ConnectionInfo::new(

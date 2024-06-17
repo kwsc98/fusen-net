@@ -7,7 +7,7 @@ use fusen_net::{
 };
 use structopt::StructOpt;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 #[tokio::main(worker_threads = 512)]
 async fn main() {
@@ -30,7 +30,7 @@ async fn main() {
             let res = tokio::select! {
                 res = client::register(server_host_clone.clone(), tag.clone()) => res,
                 _ = shutdown.recv() => {
-                    info!("shutdown");
+                    debug!("shutdown");
                     break;
                 }
             };

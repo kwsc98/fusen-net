@@ -2,7 +2,6 @@ use super::cache::AsyncCache;
 use crate::buffer::QuicBuffer;
 use crate::connection::connect_quic_to_quic;
 use crate::frame::{ConnectionInfo, Frame};
-use crate::quic::{self, support};
 use crate::shutdown::Shutdown;
 use crate::{frame, ChannelInfo};
 use quinn::Connection;
@@ -56,8 +55,8 @@ impl Channel {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         loop {
             let frame = tokio::select! {
-                res = buffer.read_frame() => FrameType::Socket(res?),
-                res1 = receiver.recv() => FrameType::Handler(res1.ok_or::<crate::Error>("receiver error".into())?),
+                frame = buffer.read_frame() => FrameType::Socket(frame?),
+                frame = receiver.recv() => FrameType::Handler(frame.ok_or::<crate::Error>("receiver error".into())?),
                 _ = shutdown.recv() => {
                     return Ok(());
                 }
@@ -78,12 +77,6 @@ impl Channel {
                                     channel_info.clone(),
                                 )
                                 .await;
-                            // let Ok((quic_buffer, _addr)) =
-                            //     quic::connect(channel_info.net_addr.clone()).await
-                            // else {
-                            //     return Err("connect error".into());
-                            // };
-                            // buffer = quic_buffer;
                             let async_cache_clone = async_cache.clone();
                             //KeepAlive
                             tokio::spawn(async move {
@@ -148,27 +141,25 @@ impl Channel {
                                         .get(subscribe_info.get_target_tag().to_owned())
                                         .await
                                         .unwrap();
-                                    let target_sockeraddr = match addr {
-                                        Some(channel) => Some(channel.net_addr.to_string()),
-                                        None => None,
-                                    };
+                                    let target_sockeraddr =
+                                        addr.map(|channel| channel.net_addr.to_string());
                                     subscribe_info.set_target_sockeraddr(target_sockeraddr);
                                     let _ = buffer
                                         .write_frame(&Frame::Subscribe(subscribe_info.clone()))
                                         .await;
-                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    tokio::time::sleep(Duration::from_secs(2)).await;
                                 }
                             });
                             return Ok(());
                         }
                         frame::Frame::Ping => {
-                            let _ = buffer.write_frame(&frame::Frame::Ack).await?;
+                            buffer.write_frame(&frame::Frame::Ack).await?;
                         }
                         _ => (),
                     }
                 }
                 FrameType::Handler(frame) => {
-                    let _ = buffer.write_frame(&frame).await;
+                    buffer.write_frame(&frame).await?;
                 }
             }
         }

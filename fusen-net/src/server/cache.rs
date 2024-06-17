@@ -25,6 +25,16 @@ pub struct AsyncCache<K, V> {
     sender: AsyncCacheSender<K, V>,
 }
 
+impl<K, V> Default for AsyncCache<K, V>
+where
+    K: Hash + Eq + std::marker::Send + Sync + 'static,
+    V: std::marker::Send + Sync + 'static + Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V> AsyncCache<K, V>
 where
     K: Hash + Eq + std::marker::Send + Sync + 'static,

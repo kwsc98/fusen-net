@@ -15,11 +15,6 @@ pub mod quic;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type FusenFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-#[derive(Debug)]
-pub struct ServerInfo{
-   server_host : String
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct MetaData {
     pub inner: HashMap<String, String>,
