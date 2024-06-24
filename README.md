@@ -61,5 +61,5 @@ docker run --name fusen-net-server -p 8089:8089 kwsc98/fusen-net-server:latest
 docker run --name fusen-net-agent1 -e SERVER_HOST=120.46.75.13:8089 -e TAG=agent1 kwsc98/fusen-net-client:latest
 
 //Client-agent2
-docker run --name fusen-net-agent2 -e SERVER_HOST=120.46.75.13:8089 -e TAG=agent2 -e AGENTS=agent1-0.0.0.0:8081-8078,agent1-0.0.0.0:8082-8079 -p 8078:8078 -p 8079:8079 kwsc98/fusen-net-client:latest
+docker run --name fusen-net-agent2 -e SERVER_HOST=120.46.75.13:8089 -e TAG=agent2 -e AGENTS=RM-agent1-0.0.0.0:8081-8078,RM-agent1-0.0.0.0:8082-8079 -p 8078:8078 -p 8079:8079 kwsc98/fusen-net-client:latest
 ```
