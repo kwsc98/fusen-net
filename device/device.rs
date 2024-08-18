@@ -1,5 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use packet::{builder::Builder, icmp, ip, Packet};
+use pnet::{packet::Packet as _, transport::ipv4_packet_iter};
 use tokio::sync::mpsc::Receiver;
 use tun2::{self, BoxError, Configuration};
 
@@ -7,7 +8,7 @@ use tun2::{self, BoxError, Configuration};
 async fn main() -> Result<(), BoxError> {
     let mut config = tun2::Configuration::default();
     config
-        .address((10, 0, 0, 2))
+        .address((10, 1, 0, 2))
         .netmask((255, 255, 0, 0))
         .destination((10, 0, 0, 1))
         .up();
@@ -28,30 +29,11 @@ async fn main() -> Result<(), BoxError> {
     let mut framed = dev.into_framed();
     loop {
         let packet = framed.next().await;
-        let pkt = packet.unwrap().unwrap();
-        match ip::Packet::new(pkt) {
-            Ok(ip::Packet::V4(pkt)) => {
-                if let Ok(icmp) = icmp::Packet::new(pkt.payload()) {
-                    if let Ok(icmp) = icmp.echo() {
-                        println!("{:?} - {:?}", icmp.sequence(), pkt.destination());
-                        let reply = ip::v4::Builder::default()
-                            .id(0x42)?
-                            .ttl(64)?
-                            .source(pkt.destination())?
-                            .destination(pkt.source())?
-                            .icmp()?
-                            .echo()?
-                            .reply()?
-                            .identifier(icmp.identifier())?
-                            .sequence(icmp.sequence())?
-                            .payload(icmp.payload())?
-                            .build()?;
-                        framed.send(reply).await?;
-                    }
-                }
-            }
-            Err(err) => println!("Received an invalid packet: {:?}", err),
-            _ => {}
-        }
+        let mut pkt = packet.unwrap().unwrap();
+        let mut d1 = pnet::packet::ipv4::MutableIpv4Packet::new(&mut pkt).unwrap();
+        println!("{:?} - {:?}", d1.get_destination(), d1.get_source());
+        d1.set_source(d1.get_destination());
+        d1.set_destination(d1.get_source());
+        let _ = framed.send(d1.packet().to_vec()).await;
     }
 }

@@ -30,5 +30,6 @@ pretty_env_logger = "0.5"
 #json序列化
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+pnet = "0"
 
 uuid = { version = "1", features = ["v4"] }
