@@ -1,9 +1,10 @@
-use super::cache::AsyncCache;
 use crate::buffer::QuicBuffer;
 use crate::connection::connect_quic_to_quic;
 use crate::frame::{ConnectionInfo, Frame};
 use crate::shutdown::Shutdown;
 use crate::{frame, ChannelInfo};
+use fusen_common::utils::cache::AsyncCache;
+use fusen_common::utils::map::AsyncMap;
 use quinn::Connection;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,7 +30,7 @@ impl Channel {
     pub fn new(
         connection: Connection,
         socket_addr: SocketAddr,
-        async_cache: AsyncCache<String, Arc<ChannelInfo>>,
+        async_cache: AsyncMap<String, Arc<ChannelInfo>>,
         _shutdown_complete_tx: mpsc::Sender<()>,
         shutdown: Shutdown,
     ) -> Self {

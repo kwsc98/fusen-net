@@ -2,7 +2,6 @@ use crate::buffer::{QuicBuffer, TcpBuffer};
 use crate::common::get_uuid;
 use crate::frame::{ConnectionInfo, Frame, RegisterInfo, SubscribeInfo};
 use crate::quic::support::make_server_endpoint;
-use crate::server::cache::AsyncCache;
 use crate::{connection, quic};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

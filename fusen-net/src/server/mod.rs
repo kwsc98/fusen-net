@@ -1,14 +1,14 @@
 use crate::quic::support::make_server_endpoint;
 use crate::shutdown::Shutdown;
 use crate::ChannelInfo;
-use cache::AsyncCache;
 use channel::Channel;
+use fusen_common::utils::cache::AsyncCache;
+use fusen_common::utils::map::AsyncMap;
 use std::sync::Arc;
 use tokio::signal;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, info};
-pub mod cache;
 mod channel;
 
 pub struct Server {
@@ -22,7 +22,7 @@ impl Server {
     pub async fn start(self) -> Result<(), crate::Error> {
         let bind_addr = format!("0.0.0.0:{}", self.port).parse()?;
         let endpoint = make_server_endpoint(bind_addr)?.0;
-        let async_cache = AsyncCache::<String, Arc<ChannelInfo>>::new();
+        let async_cache = AsyncMap::<String, Arc<ChannelInfo>>::new();
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
         let notify_shutdown: Sender<()> = broadcast::channel(1).0;
         info!("server start");

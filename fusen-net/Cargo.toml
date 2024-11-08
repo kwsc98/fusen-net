@@ -8,6 +8,7 @@ description.workspace = true
 
 
 [dependencies]
+fusen-common.workspace = true
 #网络协议处理
 tokio.workspace = true
 bytes.workspace = true
@@ -27,6 +28,5 @@ pretty_env_logger.workspace = true
 #json处理
 serde.workspace = true
 serde_json.workspace = true
-
 uuid.workspace = true
 

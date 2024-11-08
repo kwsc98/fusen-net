@@ -4,6 +4,8 @@ use frame::{Frame, RegisterInfo};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 pub mod buffer;
+pub mod bufferv2;
+pub mod framev2;
 pub mod client;
 pub mod common;
 pub mod connection;
