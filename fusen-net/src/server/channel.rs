@@ -15,7 +15,7 @@ use tracing::info;
 pub struct Channel {
     connection: Connection,
     socket_addr: SocketAddr,
-    async_cache: AsyncCache<String, Arc<ChannelInfo>>,
+    async_cache: AsyncMap<String, Arc<ChannelInfo>>,
     _shutdown_complete_tx: mpsc::Sender<()>,
     shutdown: Shutdown,
 }
@@ -96,7 +96,7 @@ impl Channel {
                         frame::Frame::Connection(connection_info) => {
                             let target_channel_info = async_cache
                                 .get(connection_info.get_target_tag().to_owned())
-                                .await?
+                                .await
                                 .ok_or(format!("not find connection : {:?}", connection_info))?;
                             let channel_info = Arc::new(ChannelInfo {
                                 net_addr: socket_addr,
@@ -121,7 +121,7 @@ impl Channel {
                         frame::Frame::TargetConnection(connection_info) => {
                             let source_channel_info = async_cache
                                 .get(connection_info.get_source_tag().to_owned())
-                                .await?
+                                .await
                                 .ok_or(format!(
                                     "not find targetConnection: {:?}",
                                     connection_info
@@ -142,9 +142,8 @@ impl Channel {
                                         .get(subscribe_info.get_target_tag().to_owned())
                                         .await
                                         .unwrap();
-                                    let target_sockeraddr =
-                                        addr.map(|channel| channel.net_addr.to_string());
-                                    subscribe_info.set_target_sockeraddr(target_sockeraddr);
+                                    let target_sockeraddr = addr.net_addr.to_string();
+                                    subscribe_info.set_target_sockeraddr(Some(target_sockeraddr));
                                     let _ = buffer
                                         .write_frame(&Frame::Subscribe(subscribe_info.clone()))
                                         .await;

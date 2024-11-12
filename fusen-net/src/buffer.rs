@@ -114,7 +114,7 @@ impl QuicBuffer {
     }
 
     pub async fn read_frame(&mut self) -> Result<Frame, crate::Error> {
-        loop {
+        loop {   
             let mut buf = Cursor::new(&self.buffer[..]);
             if let Ok(frame) = Frame::parse(&mut buf) {
                 self.buffer.advance(buf.position() as usize);

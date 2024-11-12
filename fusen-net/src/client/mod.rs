@@ -3,6 +3,7 @@ use crate::common::get_uuid;
 use crate::frame::{ConnectionInfo, Frame, RegisterInfo, SubscribeInfo};
 use crate::quic::support::make_server_endpoint;
 use crate::{connection, quic};
+use fusen_common::utils::map::AsyncMap;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -146,7 +147,7 @@ pub async fn agent(register_addr: String, agent_info: AgentInfo) -> Result<(), c
 }
 
 async fn dm_handler(register_addr: String, agent_info: AgentInfo) -> Result<(), crate::Error> {
-    let async_cache: AsyncCache<String, String> = AsyncCache::new();
+    let async_cache: AsyncMap<String, String> = AsyncMap::new();
     let register_addr_clone = register_addr.clone();
     let host: SocketAddr = register_addr_clone.parse().unwrap();
     let (mut quic_buffer, _) = quic::connect(host).await.expect("udp connect error");
@@ -183,7 +184,7 @@ async fn dm_handler(register_addr: String, agent_info: AgentInfo) -> Result<(), 
         let async_cache_clone = async_cache.clone();
         tokio::spawn(async move {
             let tcp_buffer = TcpBuffer::new(tcp_stream.0);
-            let Ok(Some(addr)) = async_cache_clone.get(agent_info.target_tag.clone()).await else {
+            let Some(addr) = async_cache_clone.get(agent_info.target_tag.clone()).await else {
                 debug!("not find addr");
                 return;
             };
