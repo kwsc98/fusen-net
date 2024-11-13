@@ -1,16 +1,17 @@
-use crate::buffer::QuicBuffer;
+use crate::buffer::{Buffer, QuicBuffer};
+use crate::common::get_uuid;
 use crate::connection::connect_quic_to_quic;
 use crate::frame::{ConnectionInfo, Frame};
 use crate::shutdown::Shutdown;
 use crate::{frame, ChannelInfo};
-use fusen_common::utils::cache::AsyncCache;
 use fusen_common::utils::map::AsyncMap;
 use quinn::Connection;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
-use tracing::info;
+use tracing::debug;
+use tracing::{error, info};
 
 pub struct Channel {
     connection: Connection,
@@ -52,16 +53,31 @@ impl Channel {
             mut shutdown,
         } = self;
         let (send_stream, recv_stream) = connection.accept_bi().await?;
-        let mut buffer = QuicBuffer::new(send_stream, recv_stream);
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut buffer = QuicBuffer::new(send_stream, recv_stream, 1 * 1024 * 1024);
+        let uuid = get_uuid();
         loop {
             let frame = tokio::select! {
-                frame = buffer.read_frame() => FrameType::Socket(frame?),
-                frame = receiver.recv() => FrameType::Handler(frame.ok_or::<crate::Error>("receiver error".into())?),
+                frame = buffer.read_frame() => frame?,
                 _ = shutdown.recv() => {
                     return Ok(());
                 }
             };
+            match frame {
+                Frame::Ping => {
+                    if let Err(info) = buffer.write_frame(&Frame::Ack).await {
+                        error!("Send Ack Error : {:?}", info);
+                    }
+                }
+                Frame::Ack => {
+                    debug!("Recv Ack");
+                }
+                Frame::Register(register_info) => {
+                    //根据注册信息，暴露相应的端口
+                }
+                Frame::Connection(connection_info) => todo!(),
+                Frame::TargetConnection(connection_info) => todo!(),
+            }
+
             match frame {
                 FrameType::Socket(frame) => {
                     match frame {

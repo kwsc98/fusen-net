@@ -64,7 +64,7 @@ impl Frame {
         Ok(frame)
     }
 
-    pub fn serialization(&self) -> Result<Bytes, crate::Error> {
+    pub fn serialization(&self) -> Result<BytesMut, crate::Error> {
         let mut bytes = BytesMut::with_capacity(128);
         match self {
             Frame::Connection(connection_info) => {
@@ -97,7 +97,7 @@ impl Frame {
             head.put_u8(le_bytes[idx]);
         }
         head.unsplit(bytes);
-        Ok(head.into())
+        Ok(head)
     }
 }
 

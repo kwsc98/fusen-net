@@ -2,7 +2,6 @@ use crate::quic::support::make_server_endpoint;
 use crate::shutdown::Shutdown;
 use crate::ChannelInfo;
 use channel::Channel;
-use fusen_common::utils::cache::AsyncCache;
 use fusen_common::utils::map::AsyncMap;
 use std::sync::Arc;
 use tokio::signal;
