@@ -1,4 +1,5 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
+use fusen_common::fusen_procedural_macro::Data;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
@@ -16,17 +17,16 @@ pub enum Frame {
     TargetConnection(ConnectionInfo),
 }
 
-#[derive(Debug, Deserialize, Serialize,Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, Data)]
 pub struct RegisterInfo {
     uuid: String,
     info: String,
     //0 tcp 1 udp
     protocol: u16,
-    target_host: Option<Vec<String>>,
-    remote_port: u16,
+    target_host: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Data)]
 pub struct ConnectionInfo {
     uuid: String,
     target_host: String,
