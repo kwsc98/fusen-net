@@ -81,6 +81,16 @@ pub struct TcpBuffer {
     buffer_size: usize,
 }
 
+impl TcpBuffer {
+    pub fn new(stream: TcpStream, buffer_size: usize) -> Self {
+        Self {
+            stream: BufWriter::new(stream),
+            buffer: BytesMut::with_capacity(buffer_size),
+            buffer_size,
+        }
+    }
+}
+
 impl Buffer for TcpBuffer {
     async fn read_buf(&mut self) -> Result<&mut BytesMut, BoxError> {
         if 0 == self.stream.read_buf(&mut self.buffer).await? {

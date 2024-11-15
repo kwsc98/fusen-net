@@ -1,16 +1,17 @@
 use frame::{Frame, RegisterInfo};
+use fusen_common::fusen_procedural_macro::Data;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{broadcast, mpsc::UnboundedSender};
 pub mod buffer;
 pub mod client;
 pub mod common;
-pub mod connection;
 pub mod frame;
 pub mod quic;
 pub mod server;
 pub mod shutdown;
 pub mod socket;
+pub mod utils;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type FusenFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
@@ -25,21 +26,15 @@ pub enum Protocol {
     V6,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Data)]
 pub struct ChannelInfo {
-    net_addr: SocketAddr,
     register_info: RegisterInfo,
-    sender: UnboundedSender<Frame>,
+    sender: broadcast::Sender<()>,
 }
 
 impl ChannelInfo {
-    pub fn new(
-        net_addr: SocketAddr,
-        register_info: RegisterInfo,
-        sender: UnboundedSender<Frame>,
-    ) -> Self {
+    pub fn new(register_info: RegisterInfo, sender: broadcast::Sender<()>) -> Self {
         Self {
-            net_addr,
             register_info,
             sender,
         }

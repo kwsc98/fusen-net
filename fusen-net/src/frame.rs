@@ -13,20 +13,20 @@ pub enum Frame {
     Ping,
     Ack,
     Register(RegisterInfo),
+    UnRegister(RegisterInfo),
     Connection(ConnectionInfo),
     TargetConnection(ConnectionInfo),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Data)]
 pub struct RegisterInfo {
-    uuid: String,
     info: String,
     //0 tcp 1 udp
     protocol: u16,
     target_host: String,
 }
 
-#[derive(Debug, Deserialize, Serialize, Data)]
+#[derive(Debug, Deserialize, Serialize, Data, Default)]
 pub struct ConnectionInfo {
     uuid: String,
     target_host: String,
@@ -54,6 +54,7 @@ impl Frame {
             b'*' => Frame::Connection(serde_json::from_slice(&buf[6..pointer])?),
             b'&' => Frame::TargetConnection(serde_json::from_slice(&buf[6..pointer])?),
             b'+' => Frame::Register(serde_json::from_slice(&buf[6..pointer])?),
+            b'-' => Frame::UnRegister(serde_json::from_slice(&buf[6..pointer])?),
             b'!' => match &buf[6..pointer] {
                 b"ping" => Frame::Ping,
                 _ => Frame::Ack,
@@ -85,6 +86,10 @@ impl Frame {
             }
             Frame::Register(register_info) => {
                 bytes.put_u8(b'+');
+                bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
+            }
+            Frame::UnRegister(register_info) => {
+                bytes.put_u8(b'-');
                 bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
             }
             _ => return Err("serialization error".into()),

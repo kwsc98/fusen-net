@@ -1,25 +1,22 @@
 use crate::buffer::{Buffer, QuicBuffer};
-use crate::common::get_uuid;
-use crate::connection::connect_quic_to_quic;
-use crate::frame::{ConnectionInfo, Frame};
+use crate::frame::Frame;
 use crate::shutdown::Shutdown;
-use crate::{frame, ChannelInfo};
+use crate::utils::map::AsyncQuicBufferMap;
+use crate::ChannelInfo;
 use fusen_common::utils::map::AsyncMap;
 use fusen_common::BoxError;
 use quinn::Connection;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc::{self, UnboundedReceiver};
+use tokio::sync::mpsc::{self};
 use tracing::debug;
-use tracing::{error, info};
+use tracing::error;
 
 use super::register;
 
 pub struct Channel {
     connection: Connection,
     socket_addr: SocketAddr,
-    async_cache: AsyncMap<String, Arc<ChannelInfo>>,
+    channel_info: AsyncMap<String, ChannelInfo>,
     _shutdown_complete_tx: mpsc::Sender<()>,
     shutdown: Shutdown,
 }
@@ -34,14 +31,14 @@ impl Channel {
     pub fn new(
         connection: Connection,
         socket_addr: SocketAddr,
-        async_cache: AsyncMap<String, mpsc::Sender<QuicBuffer>>,
+        channel_info: AsyncMap<String, ChannelInfo>,
         _shutdown_complete_tx: mpsc::Sender<()>,
         shutdown: Shutdown,
     ) -> Self {
         Self {
             connection,
             socket_addr,
-            async_cache,
+            channel_info,
             _shutdown_complete_tx,
             shutdown,
         }
@@ -51,11 +48,11 @@ impl Channel {
         let Channel {
             connection,
             socket_addr,
-            async_cache,
+            channel_info,
             _shutdown_complete_tx,
             mut shutdown,
         } = self;
-        let async_cache = AsyncMap::new();
+        let async_cache = AsyncQuicBufferMap::new();
         loop {
             let (send_stream, recv_stream) = tokio::select! {
                 stream = connection.accept_bi() => stream?,
@@ -64,9 +61,10 @@ impl Channel {
                 }
             };
             let async_cache = async_cache.clone();
+            let channel_info = channel_info.clone();
             tokio::spawn(async move {
                 let buffer = QuicBuffer::new(send_stream, recv_stream, 1 * 1024 * 1024);
-                let result = handler(buffer, async_cache).await;
+                let result = handler(buffer, async_cache, channel_info).await;
                 if let Err(error) = result {
                     error!("handler error : {:?}", error);
                 }
@@ -77,7 +75,8 @@ impl Channel {
 
 async fn handler(
     mut buffer: QuicBuffer,
-    async_cache: AsyncMap<String, mpsc::Sender<QuicBuffer>>,
+    async_cache: AsyncQuicBufferMap,
+    channel_info: AsyncMap<String, ChannelInfo>,
 ) -> Result<(), BoxError> {
     let (sender, mut recv) = mpsc::unbounded_channel::<Frame>();
     loop {
@@ -96,11 +95,26 @@ async fn handler(
             }
             Frame::Register(register_info) => {
                 let result =
-                    register::register(sender.clone(), register_info, async_cache.clone()).await;
+                    register::register(sender.clone(), register_info.clone(), async_cache.clone())
+                        .await;
                 match result {
-                    Ok(_) => buffer.write_frame(&Frame::Ack).await?,
+                    Ok(sender) => {
+                        channel_info
+                            .insert(
+                                register_info.get_target_host().to_owned(),
+                                ChannelInfo::new(register_info, sender),
+                            )
+                            .await;
+                        buffer.write_frame(&Frame::Ack).await?
+                    }
                     Err(error) => error!("register error : {:?}", error),
                 }
+            }
+            Frame::UnRegister(register_info) => {
+                let _ = channel_info
+                    .remove(register_info.get_target_host().to_owned())
+                    .await;
+                buffer.write_frame(&Frame::Ack).await?
             }
             Frame::TargetConnection(connection_info) => {
                 //根据uuid获取sender
@@ -110,7 +124,7 @@ async fn handler(
                 let Some(sender) = sender else {
                     return Err("recv connection time out".into());
                 };
-                sender.send(buffer).await;
+                sender.send(buffer);
                 return Ok(());
             }
             Frame::Connection(connection_info) => {
