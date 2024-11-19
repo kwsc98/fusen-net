@@ -1,6 +1,9 @@
 //! Commonly used code in most examples.
 
+use base64::{prelude::BASE64_STANDARD, Engine};
+use fusen_common::BoxError;
 use quinn::{ClientConfig, Endpoint, ServerConfig};
+use rcgen::{Certificate, CertificateParams, CertifiedKey, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use std::{error::Error, net::SocketAddr, sync::Arc};
 
@@ -25,21 +28,25 @@ fn configure_client(
 }
 
 #[allow(unused)]
-pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), crate::Error> {
-    let (server_config, server_cert) = configure_server()?;
-    let endpoint = Endpoint::server(server_config, bind_addr)?;
-    Ok((endpoint, server_cert.to_vec()))
-}
-
-fn configure_server(
-) -> Result<(ServerConfig, CertificateDer<'static>), Box<dyn Error + Send + Sync + 'static>> {
-    let cert = rcgen::generate_simple_self_signed(vec!["fusen-net".into()]).unwrap();
-    let cert_der = CertificateDer::from(cert.cert);
-    let priv_key = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
-    let mut server_config =
-        ServerConfig::with_single_cert(vec![cert_der.clone()], priv_key.into())?;
+pub fn make_server_endpoint(
+    bind_addr: SocketAddr,
+    cert: CertifiedKeyV2<'static>,
+) -> Result<Endpoint, crate::Error> {
+    let CertifiedKeyV2 { priv_key, cert } = cert;
+    let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.max_concurrent_uni_streams(0_u8.into());
+    let endpoint = Endpoint::server(server_config, bind_addr)?;
+    Ok(endpoint)
+}
 
-    Ok((server_config, cert_der))
+pub struct CertifiedKeyV2<'a> {
+    priv_key: PrivatePkcs8KeyDer<'a>,
+    cert: CertificateDer<'a>,
+}
+
+pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<'a>, BoxError> {
+    let priv_key = PrivatePkcs8KeyDer::from(BASE64_STANDARD.decode(priv_key)?);
+    let cert = CertificateDer::from(BASE64_STANDARD.decode(cert)?);
+    Ok(CertifiedKeyV2 { priv_key, cert })
 }

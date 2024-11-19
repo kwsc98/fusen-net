@@ -42,7 +42,7 @@ impl Buffer for QuicBuffer {
             return Err("connection reset by peer".into());
         }
         if self.buffer.capacity() > self.buffer_size && self.buffer.len() < self.buffer_size {
-            self.buffer.split_off(self.buffer_size);
+            let _ = self.buffer.split_off(self.buffer_size);
         }
         Ok(&mut self.buffer)
     }
@@ -97,7 +97,7 @@ impl Buffer for TcpBuffer {
             return Err("connection reset by peer".into());
         }
         if self.buffer.capacity() > self.buffer_size && self.buffer.len() < self.buffer_size {
-            self.buffer.split_off(self.buffer_size);
+            let _ = self.buffer.split_off(self.buffer_size);
         }
         Ok(&mut self.buffer)
     }

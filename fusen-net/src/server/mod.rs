@@ -1,8 +1,9 @@
 use crate::common::get_uuid;
-use crate::quic::support::make_server_endpoint;
+use crate::quic::support::{generate_signed, make_server_endpoint, CertifiedKeyV2};
 use crate::shutdown::Shutdown;
 use crate::ChannelInfo;
 use channel::Channel;
+use fusen_common::fusen_procedural_macro::Data;
 use fusen_common::utils::map::AsyncMap;
 use tokio::signal;
 use tokio::sync::broadcast::Sender;
@@ -11,17 +12,18 @@ use tracing::{debug, info};
 mod channel;
 mod register;
 
+#[derive(Data)]
 pub struct Server {
     port: String,
+    prik_key: String,
+    cert: String,
 }
 
 impl Server {
-    pub fn new(port: &str) -> Self {
-        Self { port: port.into() }
-    }
     pub async fn start(self) -> Result<(), crate::Error> {
         let bind_addr = format!("0.0.0.0:{}", self.port).parse()?;
-        let endpoint = make_server_endpoint(bind_addr)?.0;
+        let endpoint =
+            make_server_endpoint(bind_addr, generate_signed(&self.prik_key, &self.cert)?)?;
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
         let channel_info: AsyncMap<String, AsyncMap<String, ChannelInfo>> = AsyncMap::new();
         let notify_shutdown: Sender<()> = broadcast::channel(1).0;

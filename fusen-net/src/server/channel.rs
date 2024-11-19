@@ -124,7 +124,7 @@ async fn handler(
                 let Some(sender) = sender else {
                     return Err("recv connection time out".into());
                 };
-                sender.send(buffer);
+                let _ = sender.send(buffer);
                 return Ok(());
             }
             Frame::Connection(connection_info) => {

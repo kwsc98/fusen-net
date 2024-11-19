@@ -18,6 +18,7 @@ quinn.workspace = true
 rustls.workspace = true
 rcgen.workspace = true
 libc.workspace = true
+base64.workspace = true
 
 
 #日志处理

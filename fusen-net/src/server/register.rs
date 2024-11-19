@@ -57,7 +57,7 @@ async fn tcp_listener(
             tokio::spawn(async move {
                 let uuid = get_uuid();
                 let (sendr, recv) = oneshot::channel::<QuicBuffer>();
-                async_map.insert(uuid.clone(), sendr);
+                async_map.insert(uuid.clone(), sendr).await;
                 let result: Result<(), mpsc::error::SendError<Frame>> =
                     sender.send(Frame::Connection(
                         ConnectionInfo::default()

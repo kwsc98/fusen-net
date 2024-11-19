@@ -18,6 +18,7 @@ path = "src/test.rs"
 
 
 [dependencies]
+fusen-common.workspace = true
 fusen-net.workspace = true
 tokio.workspace = true
 structopt = "0.3"

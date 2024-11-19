@@ -7,8 +7,8 @@ async fn main() {
     init_log();
     let cli = Cli::from_args();
     let port = cli.port.as_deref().unwrap_or("8089");
-    let server = server::Server::new(port);
-    let _ = server.start().await;
+    // let server = server::Server::new(port);
+    // let _ = server.start().await;
 }
 
 #[derive(StructOpt)]
