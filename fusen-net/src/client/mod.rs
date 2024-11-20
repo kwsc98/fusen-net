@@ -1,15 +1,18 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    buffer::{Buffer, QuicBuffer},
+    buffer::{Buffer, QuicBuffer, TcpBuffer, DEFAULT_BUF_SIZE},
     frame::{Frame, RegisterInfo},
     quic::support::make_client_endpoint,
 };
 use base64::Engine;
-use fusen_common::BoxError;
+use fusen_common::{shutdown::Shutdown, BoxError};
 use quinn::Connection;
-use tokio::sync::Mutex;
-use tracing::{debug, error};
+use tokio::{
+    net::TcpStream,
+    sync::{broadcast, Mutex},
+};
+use tracing::{debug, error, info};
 
 pub struct Agent {
     connection: Connection,
@@ -44,16 +47,15 @@ impl Agent {
             return Err(info.into());
         }
         let (send_stream, recv_stram) = self.connection.open_bi().await?;
-        let mut quic_buffer = QuicBuffer::new(send_stream, recv_stram, 1 * 1024 * 1024);
+        let mut quic_buffer = QuicBuffer::new(send_stream, recv_stram, DEFAULT_BUF_SIZE);
         let _ = quic_buffer
             .write_frame(&crate::frame::Frame::Register(info.clone()))
             .await;
-        let _ack = quic_buffer.read_frame().await?;
         let target_host = info.get_target_host().to_owned();
         map.insert(info.get_target_host().to_owned(), info);
         drop(map);
         let map = self.channel_info.clone();
-        let connect = self.connection.clone();
+        let mut connect = self.connection.clone();
         tokio::spawn(async move {
             loop {
                 let result = tokio::select! {
@@ -66,16 +68,11 @@ impl Agent {
                         break;
                     }
                 };
-                let result = match frame {
-                    crate::frame::Frame::Ping => {
-                        let _ = quic_buffer.write_frame(&crate::frame::Frame::Ack).await;
-                    }
-                    crate::frame::Frame::Ack => todo!(),
-                    crate::frame::Frame::Register(register_info) => todo!(),
-                    crate::frame::Frame::UnRegister(register_info) => todo!(),
-                    crate::frame::Frame::Connection(connection_info) => todo!(),
-                    crate::frame::Frame::TargetConnection(connection_info) => todo!(),
-                };
+                let result = do_frame(frame, &mut quic_buffer, &mut connect).await;
+                if let Err(error) = result {
+                    error!("do_frame error {:?}", error);
+                    break;
+                }
             }
             let mut map = map.lock().await;
             let _ = map.remove(&target_host);
@@ -90,16 +87,39 @@ async fn do_frame(
     quic_buffer: &mut QuicBuffer,
     connect: &mut Connection,
 ) -> Result<(), BoxError> {
+    info!("{:?}", frame);
     match frame {
         crate::frame::Frame::Ping => {
-            let _ = quic_buffer.write_frame(&crate::frame::Frame::Ack).await?;
+            quic_buffer.write_frame(&crate::frame::Frame::Ack).await?;
         }
         crate::frame::Frame::Ack => {
             debug!("recv Ack")
         }
-        crate::frame::Frame::Connection(connection_info) => {
-
-        }
+        crate::frame::Frame::Connection(connection_info) => match connect.open_bi().await {
+            Ok((send_stream, recv_stream)) => {
+                tokio::spawn(async move {
+                    let result = TcpStream::connect(connection_info.get_target_host()).await;
+                    let tcp_stream = match result {
+                        Ok(stream) => stream,
+                        Err(error) => {
+                            error!("connect target_host error : {:?}", error);
+                            return;
+                        }
+                    };
+                    let tcp_buffer = TcpBuffer::new(tcp_stream, DEFAULT_BUF_SIZE);
+                    let mut quic_buffer =
+                        QuicBuffer::new(send_stream, recv_stream, DEFAULT_BUF_SIZE);
+                    let _ = quic_buffer
+                        .write_frame(&Frame::TargetConnection(connection_info))
+                        .await;
+                    let (s, _r) = broadcast::channel::<()>(1);
+                    let shutdown = Shutdown::new(s.subscribe());
+                    let result = crate::buffer::connect(tcp_buffer, quic_buffer, shutdown).await;
+                    debug!("connect close ~ : {:?}", result);
+                });
+            }
+            Err(error) => error!("connect open_bi error : {:?}", error),
+        },
         frame => {
             let info = format!("recv error frame : {:?}", frame);
             error!(info);

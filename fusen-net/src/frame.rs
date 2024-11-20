@@ -18,7 +18,7 @@ pub enum Frame {
     TargetConnection(ConnectionInfo),
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Data)]
+#[derive(Default, Debug, Deserialize, Serialize, Clone, Data)]
 pub struct RegisterInfo {
     info: String,
     //0 tcp 1 udp
@@ -35,7 +35,7 @@ pub struct ConnectionInfo {
 impl Frame {
     pub fn parse(bytes: &mut BytesMut) -> Result<Frame, FrameError> {
         let buf = bytes.as_ref();
-        let Some(first) = buf.get(0) else {
+        let Some(first) = buf.first() else {
             return Err(FrameError::Incomplete);
         };
         if first != &b'0' {
@@ -92,7 +92,6 @@ impl Frame {
                 bytes.put_u8(b'-');
                 bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
             }
-            _ => return Err("serialization error".into()),
         }
         let len = bytes.len();
         let mut head: BytesMut = BytesMut::with_capacity(5 + len);

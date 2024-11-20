@@ -3,9 +3,8 @@
 use base64::{prelude::BASE64_STANDARD, Engine};
 use fusen_common::BoxError;
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use rcgen::{Certificate, CertificateParams, CertifiedKey, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 
 #[allow(unused)]
 pub fn make_client_endpoint(
@@ -14,6 +13,7 @@ pub fn make_client_endpoint(
 ) -> Result<Endpoint, crate::Error> {
     let client_cfg = configure_client(server_certs)?;
     let mut endpoint = Endpoint::client(bind_addr)?;
+    endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
 
@@ -35,7 +35,8 @@ pub fn make_server_endpoint(
     let CertifiedKeyV2 { priv_key, cert } = cert;
     let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(0_u8.into());
+    transport_config.keep_alive_interval(Some(Duration::from_millis(1000)));
+    transport_config.max_idle_timeout(Some(Duration::from_millis(2000).try_into()?));
     let endpoint = Endpoint::server(server_config, bind_addr)?;
     Ok(endpoint)
 }

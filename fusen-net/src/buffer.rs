@@ -1,13 +1,16 @@
 use crate::frame::{Frame, FrameError};
 use bytes::BytesMut;
-use fusen_common::BoxError;
+use fusen_common::{shutdown::Shutdown, BoxError};
 use quinn::{RecvStream, SendStream};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufWriter},
     net::TcpStream,
 };
-use tracing::error;
+use tracing::{error, info};
 
+pub const DEFAULT_BUF_SIZE: usize = 8 * 1024;
+
+#[allow(async_fn_in_trait)]
 pub trait Buffer {
     async fn read_buf(&mut self) -> Result<&mut BytesMut, BoxError>;
 
@@ -20,16 +23,16 @@ pub trait Buffer {
 
 pub struct QuicBuffer {
     send_stream: SendStream,
-    recv_stram: RecvStream,
+    recv_stream: RecvStream,
     buffer: BytesMut,
     buffer_size: usize,
 }
 
 impl QuicBuffer {
-    pub fn new(send_stream: SendStream, recv_stram: RecvStream, buffer_size: usize) -> Self {
+    pub fn new(send_stream: SendStream, recv_stream: RecvStream, buffer_size: usize) -> Self {
         Self {
             send_stream,
-            recv_stram,
+            recv_stream,
             buffer: BytesMut::with_capacity(buffer_size),
             buffer_size,
         }
@@ -38,7 +41,7 @@ impl QuicBuffer {
 
 impl Buffer for QuicBuffer {
     async fn read_buf(&mut self) -> Result<&mut BytesMut, BoxError> {
-        if 0 == self.recv_stram.read_buf(&mut self.buffer).await? {
+        if 0 == self.recv_stream.read_buf(&mut self.buffer).await? {
             return Err("connection reset by peer".into());
         }
         if self.buffer.capacity() > self.buffer_size && self.buffer.len() < self.buffer_size {
@@ -59,13 +62,14 @@ impl Buffer for QuicBuffer {
                 Err(error) => {
                     if let FrameError::Other(info) = error {
                         error!("read_frame error : {:?}", info);
-                        return Err(info.into());
+                        return Err(info);
                     }
                 }
             }
-            if 0 == self.recv_stram.read_buf(&mut self.buffer).await? {
+            if 0 == self.recv_stream.read_buf(&mut self.buffer).await? {
                 return Err("connection reset by peer".into());
             }
+            println!("{:?}", self.buffer);
         }
     }
 
@@ -114,7 +118,7 @@ impl Buffer for TcpBuffer {
                 Err(error) => {
                     if let FrameError::Other(info) = error {
                         error!("read_frame error : {:?}", info);
-                        return Err(info.into());
+                        return Err(info);
                     }
                 }
             }
@@ -127,5 +131,22 @@ impl Buffer for TcpBuffer {
     async fn write_frame(&mut self, frame: &Frame) -> Result<(), BoxError> {
         let mut bytes = frame.serialization()?;
         self.write_buf(&mut bytes).await
+    }
+}
+
+pub async fn connect(
+    mut s1: impl Buffer,
+    mut s2: impl Buffer,
+    mut shutdown: Shutdown,
+) -> Result<(), BoxError> {
+    loop {
+        tokio::select! {
+            buf = s1.read_buf() => s2.write_buf(buf?).await?,
+            buf = s2.read_buf() => s1.write_buf(buf?).await?,
+            _ = shutdown.recv() => {
+                info!("connect shutdown");
+                return Ok(());
+            }
+        };
     }
 }

@@ -1,4 +1,4 @@
-use crate::buffer::{Buffer, QuicBuffer};
+use crate::buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE};
 use crate::frame::Frame;
 use crate::shutdown::Shutdown;
 use crate::utils::map::AsyncQuicBufferMap;
@@ -15,29 +15,23 @@ use super::register;
 
 pub struct Channel {
     connection: Connection,
-    socket_addr: SocketAddr,
+    _socket_addr: SocketAddr,
     channel_info: AsyncMap<String, ChannelInfo>,
     _shutdown_complete_tx: mpsc::Sender<()>,
     shutdown: Shutdown,
 }
 
-#[derive(Debug)]
-pub enum FrameType {
-    Socket(Frame),
-    Handler(Frame),
-}
-
 impl Channel {
     pub fn new(
         connection: Connection,
-        socket_addr: SocketAddr,
+        _socket_addr: SocketAddr,
         channel_info: AsyncMap<String, ChannelInfo>,
         _shutdown_complete_tx: mpsc::Sender<()>,
         shutdown: Shutdown,
     ) -> Self {
         Self {
             connection,
-            socket_addr,
+            _socket_addr,
             channel_info,
             _shutdown_complete_tx,
             shutdown,
@@ -47,7 +41,7 @@ impl Channel {
     pub async fn run(self) -> Result<(), crate::Error> {
         let Channel {
             connection,
-            socket_addr,
+            _socket_addr,
             channel_info,
             _shutdown_complete_tx,
             mut shutdown,
@@ -63,7 +57,7 @@ impl Channel {
             let async_cache = async_cache.clone();
             let channel_info = channel_info.clone();
             tokio::spawn(async move {
-                let buffer = QuicBuffer::new(send_stream, recv_stream, 1 * 1024 * 1024);
+                let buffer = QuicBuffer::new(send_stream, recv_stream, DEFAULT_BUF_SIZE);
                 let result = handler(buffer, async_cache, channel_info).await;
                 if let Err(error) = result {
                     error!("handler error : {:?}", error);
@@ -105,7 +99,7 @@ async fn handler(
                                 ChannelInfo::new(register_info, sender),
                             )
                             .await;
-                        buffer.write_frame(&Frame::Ack).await?
+                        buffer.write_frame(&Frame::Ack).await?;
                     }
                     Err(error) => error!("register error : {:?}", error),
                 }
@@ -117,7 +111,6 @@ async fn handler(
                 buffer.write_frame(&Frame::Ack).await?
             }
             Frame::TargetConnection(connection_info) => {
-                //根据uuid获取sender
                 let sender = async_cache
                     .remove(connection_info.get_uuid().to_owned())
                     .await;

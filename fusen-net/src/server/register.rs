@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    buffer::{Buffer, QuicBuffer, TcpBuffer},
+    buffer::{connect, QuicBuffer, TcpBuffer, DEFAULT_BUF_SIZE},
     common::get_uuid,
     frame::{ConnectionInfo, Frame, RegisterInfo},
     utils::map::AsyncQuicBufferMap,
@@ -34,6 +34,7 @@ async fn tcp_listener(
     async_map: AsyncQuicBufferMap,
 ) -> Result<Sender<()>, BoxError> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await?;
+    println!("{:?}", listener.local_addr());
     let (s, _r) = broadcast::channel::<()>(1);
     let mut shutdown = Shutdown::new(s.subscribe());
     tokio::spawn(async move {
@@ -82,7 +83,7 @@ async fn tcp_listener(
                         return;
                     }
                 };
-                let tcp_buffer = TcpBuffer::new(tcp_stream, 1 * 1024 * 1024);
+                let tcp_buffer = TcpBuffer::new(tcp_stream, DEFAULT_BUF_SIZE);
                 let result = connect(tcp_buffer, quci_buffer, shutdown).await;
                 debug!("connect close ~ : {:?}", result);
             });
@@ -92,26 +93,9 @@ async fn tcp_listener(
 }
 
 async fn udp_listener(
-    sender: UnboundedSender<Frame>,
-    register_info: RegisterInfo,
-    async_map: AsyncQuicBufferMap,
+    _sender: UnboundedSender<Frame>,
+    _register_info: RegisterInfo,
+    _async_map: AsyncQuicBufferMap,
 ) -> Result<Sender<()>, BoxError> {
     todo!()
-}
-
-async fn connect(
-    mut s1: impl Buffer,
-    mut s2: impl Buffer,
-    mut shutdown: Shutdown,
-) -> Result<(), BoxError> {
-    loop {
-        tokio::select! {
-            buf = s1.read_buf() => s2.write_buf(buf?).await?,
-            buf = s2.read_buf() => s1.write_buf(buf?).await?,
-            _ = shutdown.recv() => {
-                info!("connect shutdown");
-                return Ok(());
-            }
-        };
-    }
 }

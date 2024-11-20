@@ -79,5 +79,5 @@ impl AsyncQuicBufferMap {
 #[tokio::test]
 async fn test() {
     let map: AsyncQuicBufferMap = AsyncQuicBufferMap::new();
-    map.clone();
+    let _ = map.clone();
 }

@@ -9,12 +9,11 @@ description.workspace = true
 [[bin]]
 name = "client"
 path = "src/client.rs"
+
 [[bin]]
 name = "server"
 path = "src/server.rs"
-[[bin]]
-name = "test"
-path = "src/test.rs"
+
 
 
 [dependencies]
@@ -22,6 +21,7 @@ fusen-common.workspace = true
 fusen-net.workspace = true
 tokio.workspace = true
 structopt = "0.3"
+hyper = "1.5.1"
 
 #日志处理
 tracing.workspace = true
