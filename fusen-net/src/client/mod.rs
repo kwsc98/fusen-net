@@ -1,22 +1,21 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{sync::Arc, time::Duration};
 
-use crate::{
-    buffer::{Buffer, QuicBuffer, TcpBuffer, DEFAULT_BUF_SIZE},
-    frame::{Frame, RegisterInfo},
-    quic::support::make_client_endpoint,
-};
+use crate::{frame::Frame, quic::support::make_client_endpoint};
 use base64::Engine;
-use fusen_common::{shutdown::Shutdown, BoxError};
-use quinn::Connection;
-use tokio::{
-    net::TcpStream,
-    sync::{broadcast, Mutex},
+use channel::handler;
+use fusen_common::BoxError;
+use hyper_util::client::legacy::connect;
+use quinn::{Connecting, Connection, Endpoint};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    oneshot,
 };
-use tracing::{debug, error, info};
+use tracing::error;
+mod channel;
 
 pub struct Agent {
-    connection: Connection,
-    channel_info: Arc<Mutex<HashMap<String, RegisterInfo>>>,
+    conn_sender: UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
+    sender: UnboundedSender<(Frame, oneshot::Sender<Result<(), BoxError>>)>,
 }
 
 impl Agent {
@@ -33,98 +32,55 @@ impl Agent {
             .as_slice(),
         )?;
         let connection = endpoint.connect(register.parse()?, server_name)?.await?;
-        Ok(Agent {
-            connection,
-            channel_info: Arc::new(Mutex::new(HashMap::new())),
-        })
-    }
 
-    pub async fn register(&mut self, info: RegisterInfo) -> Result<(), BoxError> {
-        let mut map = self.channel_info.lock().await;
-        if map.contains_key(info.get_target_host()) {
-            let info = format!("RegisterInfo Already exist : {:?}", info);
-            error!(info);
-            return Err(info.into());
-        }
-        let (send_stream, recv_stram) = self.connection.open_bi().await?;
-        let mut quic_buffer = QuicBuffer::new(send_stream, recv_stram, DEFAULT_BUF_SIZE);
-        let _ = quic_buffer
-            .write_frame(&crate::frame::Frame::Register(info.clone()))
-            .await;
-        let target_host = info.get_target_host().to_owned();
-        map.insert(info.get_target_host().to_owned(), info);
-        drop(map);
-        let map = self.channel_info.clone();
-        let mut connect = self.connection.clone();
+        let (sender, recv) =
+            mpsc::unbounded_channel::<(Frame, oneshot::Sender<Result<(), BoxError>>)>();
+        let (conn_sender, conn_recv) =
+            mpsc::unbounded_channel::<oneshot::Sender<Result<Connection, BoxError>>>();
+        let register = register.to_owned();
+        let server_name = server_name.to_owned();
         tokio::spawn(async move {
-            loop {
-                let result = tokio::select! {
-                    frame = quic_buffer.read_frame() => frame
-                };
-                let frame = match result {
-                    Ok(frame) => frame,
-                    Err(error) => {
-                        error!("recv frame error : {:?}", error);
-                        break;
-                    }
-                };
-                let result = do_frame(frame, &mut quic_buffer, &mut connect).await;
-                if let Err(error) = result {
-                    error!("do_frame error {:?}", error);
-                    break;
-                }
-            }
-            let mut map = map.lock().await;
-            let _ = map.remove(&target_host);
-            drop(map);
+            connect_handler(conn_recv, endpoint, &register, &server_name, connection).await;
         });
-        Ok(())
+        tokio::spawn(async move {
+            handl   er(recv, conn_sender).await;
+        });
+        Ok(Agent {
+            conn_sender,
+            sender,
+        })
     }
 }
 
-async fn do_frame(
-    frame: Frame,
-    quic_buffer: &mut QuicBuffer,
-    connect: &mut Connection,
+pub async fn connect_handler(
+    recv: UnboundedReceiver<oneshot::Sender<Result<Connection, BoxError>>>,
+    endpoint: Endpoint,
+    register: &str,
+    server_name: &str,
+    connection: Connection,
 ) -> Result<(), BoxError> {
-    info!("{:?}", frame);
-    match frame {
-        crate::frame::Frame::Ping => {
-            quic_buffer.write_frame(&crate::frame::Frame::Ack).await?;
-        }
-        crate::frame::Frame::Ack => {
-            debug!("recv Ack")
-        }
-        crate::frame::Frame::Connection(connection_info) => match connect.open_bi().await {
-            Ok((send_stream, recv_stream)) => {
-                tokio::spawn(async move {
-                    let result = TcpStream::connect(connection_info.get_target_host()).await;
-                    let tcp_stream = match result {
-                        Ok(stream) => stream,
-                        Err(error) => {
-                            error!("connect target_host error : {:?}", error);
-                            return;
-                        }
-                    };
-                    let tcp_buffer = TcpBuffer::new(tcp_stream, DEFAULT_BUF_SIZE);
-                    let mut quic_buffer =
-                        QuicBuffer::new(send_stream, recv_stream, DEFAULT_BUF_SIZE);
-                    let _ = quic_buffer
-                        .write_frame(&Frame::TargetConnection(connection_info))
-                        .await;
-                    let (s, _r) = broadcast::channel::<()>(1);
-                    let shutdown = Shutdown::new(s.subscribe());
-                    let result = crate::buffer::connect(tcp_buffer, quic_buffer, shutdown).await;
-                    debug!("connect close ~ : {:?}", result);
-                });
+    let mut connect = connection;
+    loop {
+        tokio::select! {
+            sender = recv.recv() => {
+                if sender.is_none() {
+                   error!("agent close!");
+                   return Ok(());
+                }
+                let _ = sender.unwrap().send(Ok(connect.clone()));
+            },
+            error = connect.close() => {
+                error!("connect close ! : {:?}",error);
+                match endpoint.connect(register.parse().unwrap(), server_name).unwrap().await {
+                    Ok(connect) => {
+                        *connect = connect;
+                    },
+                    Err(error) => {
+                        error!("retry connect error ! : {:?}",error);
+                        let _ = tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                };
             }
-            Err(error) => error!("connect open_bi error : {:?}", error),
-        },
-        frame => {
-            let info = format!("recv error frame : {:?}", frame);
-            error!(info);
-            return Err(info.into());
         }
     }
-    Ok(())
 }
