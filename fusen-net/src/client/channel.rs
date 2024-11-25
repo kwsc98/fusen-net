@@ -4,7 +4,11 @@ use fusen_common::{shutdown::Shutdown, BoxError};
 use quinn::Connection;
 use tokio::{
     net::TcpStream,
-    sync::{broadcast, mpsc::UnboundedReceiver, oneshot},
+    sync::{
+        broadcast::{self, Sender},
+        mpsc::{UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
 };
 use tracing::{debug, error, info};
 
@@ -13,12 +17,19 @@ use crate::{
     frame::{Frame, RegisterInfo},
 };
 
+use super::get_connection;
+
+#[derive(Debug)]
+pub struct ChannelInfo {
+    _register_info: RegisterInfo,
+    _shutdown: Sender<()>,
+}
+
 pub async fn handler(
     mut recv: UnboundedReceiver<(Frame, oneshot::Sender<Result<(), BoxError>>)>,
-    connection: Connection,
+    connect_sender: UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
 ) -> Result<(), BoxError> {
-    let mut channel_info = HashMap::<String, RegisterInfo>::new();
-    let (send_stream, recv_stram) = connection.open_bi().await?;
+    let mut channel_info = HashMap::<String, ChannelInfo>::new();
     loop {
         let (frame, sender) = recv.recv().await.unwrap();
         match frame {
@@ -28,15 +39,28 @@ pub async fn handler(
                     error!(info);
                     let _ = sender.send(Err(info.into()));
                 } else {
-                    let result = register(&connection, register_info.clone()).await;
-                    if result.is_ok() {
-                        channel_info
-                            .insert(register_info.get_target_host().to_owned(), register_info);
-                    }
-                    let _ = sender.send(result);
+                    let result = register(connect_sender.clone(), register_info.clone()).await;
+                    match result {
+                        Ok(shutdown) => {
+                            channel_info.insert(
+                                register_info.get_target_host().to_owned(),
+                                ChannelInfo {
+                                    _register_info: register_info,
+                                    _shutdown: shutdown,
+                                },
+                            );
+                            let _ = sender.send(Ok(()));
+                        }
+                        Err(error) => {
+                            let _ = sender.send(Err(error));
+                        }
+                    };
                 }
             }
-            Frame::UnRegister(register_info) => todo!(),
+            Frame::UnRegister(register_info) => {
+                let _result = channel_info.remove(register_info.get_target_host());
+                let _ = sender.send(Ok(()));
+            }
             frame => {
                 let info = format!("not support frame : {:?}", frame);
                 error!(info);
@@ -46,17 +70,27 @@ pub async fn handler(
     }
 }
 
-pub async fn register(connection: &Connection, info: RegisterInfo) -> Result<(), BoxError> {
+pub async fn register(
+    connect_sender: UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
+    info: RegisterInfo,
+) -> Result<Sender<()>, BoxError> {
+    let connection = get_connection(&connect_sender).await?;
     let (send_stream, recv_stram) = connection.open_bi().await?;
     let mut quic_buffer = QuicBuffer::new(send_stream, recv_stram, DEFAULT_BUF_SIZE);
     let _ = quic_buffer
         .write_frame(&crate::frame::Frame::Register(info.clone()))
         .await;
+    let (s, _) = broadcast::channel::<()>(1);
+    let mut shutdown = Shutdown::new(s.subscribe());
     let mut connection: Connection = connection.clone();
     tokio::spawn(async move {
         loop {
             let result = tokio::select! {
-                frame = quic_buffer.read_frame() => frame
+                frame = quic_buffer.read_frame() => frame,
+                _ = shutdown.recv() => {
+                    info!("unregister : {:?}",info);
+                    return;
+                }
             };
             let frame = match result {
                 Ok(frame) => frame,
@@ -71,8 +105,9 @@ pub async fn register(connection: &Connection, info: RegisterInfo) -> Result<(),
                 break;
             }
         }
+        
     });
-    Ok(())
+    Ok(s)
 }
 
 async fn do_frame(
@@ -80,7 +115,6 @@ async fn do_frame(
     quic_buffer: &mut QuicBuffer,
     connect: &mut Connection,
 ) -> Result<(), BoxError> {
-    info!("{:?}", frame);
     match frame {
         crate::frame::Frame::Ping => {
             quic_buffer.write_frame(&crate::frame::Frame::Ack).await?;

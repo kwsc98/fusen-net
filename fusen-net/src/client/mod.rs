@@ -1,11 +1,13 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use crate::{frame::Frame, quic::support::make_client_endpoint};
+use crate::{
+    frame::{Frame, RegisterInfo},
+    quic::support::make_client_endpoint,
+};
 use base64::Engine;
 use channel::handler;
 use fusen_common::BoxError;
-use hyper_util::client::legacy::connect;
-use quinn::{Connecting, Connection, Endpoint};
+use quinn::{Connection, Endpoint};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -14,7 +16,6 @@ use tracing::error;
 mod channel;
 
 pub struct Agent {
-    conn_sender: UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
     sender: UnboundedSender<(Frame, oneshot::Sender<Result<(), BoxError>>)>,
 }
 
@@ -40,20 +41,41 @@ impl Agent {
         let register = register.to_owned();
         let server_name = server_name.to_owned();
         tokio::spawn(async move {
-            connect_handler(conn_recv, endpoint, &register, &server_name, connection).await;
+            let _ = connect_handler(conn_recv, endpoint, &register, &server_name, connection).await;
         });
         tokio::spawn(async move {
-            handl   er(recv, conn_sender).await;
+            let _ = handler(recv, conn_sender).await;
         });
-        Ok(Agent {
-            conn_sender,
-            sender,
-        })
+        Ok(Agent { sender })
+    }
+
+    pub async fn register(&self, register: RegisterInfo) -> Result<(), BoxError> {
+        self.send_frame(Frame::Register(register)).await
+    }
+
+    pub async fn unregister(&self, register: RegisterInfo) -> Result<(), BoxError> {
+        self.send_frame(Frame::UnRegister(register)).await
+    }
+
+    async fn send_frame(&self, frame: Frame) -> Result<(), BoxError> {
+        let (oneshot_sender, oneshot_recv) = oneshot::channel::<Result<(), BoxError>>();
+        let _ = self.sender.send((frame, oneshot_sender))?;
+        let result = oneshot_recv.await?;
+        result
     }
 }
 
+pub async fn get_connection(
+    sender: &UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
+) -> Result<Connection, BoxError> {
+    let (oneshot_sender, oneshot_recv) = oneshot::channel();
+    let _ = sender.send(oneshot_sender)?;
+    let result = oneshot_recv.await?;
+    result
+}
+
 pub async fn connect_handler(
-    recv: UnboundedReceiver<oneshot::Sender<Result<Connection, BoxError>>>,
+    mut recv: UnboundedReceiver<oneshot::Sender<Result<Connection, BoxError>>>,
     endpoint: Endpoint,
     register: &str,
     server_name: &str,
@@ -69,11 +91,11 @@ pub async fn connect_handler(
                 }
                 let _ = sender.unwrap().send(Ok(connect.clone()));
             },
-            error = connect.close() => {
+            error = connect.closed() => {
                 error!("connect close ! : {:?}",error);
                 match endpoint.connect(register.parse().unwrap(), server_name).unwrap().await {
-                    Ok(connect) => {
-                        *connect = connect;
+                    Ok(new_connect) => {
+                        connect = new_connect;
                     },
                     Err(error) => {
                         error!("retry connect error ! : {:?}",error);
