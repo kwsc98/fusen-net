@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{
-    buffer::{connect, QuicBuffer, TcpBuffer, DEFAULT_BUF_SIZE},
+    buffer::{connect, Buffer, QuicBuffer},
     common::get_uuid,
     frame::{ConnectionInfo, Frame, RegisterInfo},
     utils::map::AsyncQuicBufferMap,
@@ -82,8 +82,9 @@ async fn tcp_listener(
                         return;
                     }
                 };
-                let tcp_buffer = TcpBuffer::new(tcp_stream, DEFAULT_BUF_SIZE);
-                let result = connect(tcp_buffer, quci_buffer, shutdown).await;
+                let tcp_buffer = tcp_stream.into_split();
+                let quic_buffer = quci_buffer.split();
+                let result = connect(tcp_buffer, quic_buffer, shutdown).await;
                 debug!("connect close ~ : {:?}", result);
             });
         }

@@ -14,25 +14,25 @@ description = "FusenNet"
 fusen-net = { path = "fusen-net" }
 fusen-common = "0.7.5"
 #网络协议处理
-tokio = { version = "1.41.1", features = ["full"] }
-bytes = "1.8.0"
+tokio = { version = "1.42.0", features = ["sync"] }
+bytes = "1.9.0"
 hyper-util = "0.1.10"
 futures = "0.3.31"
 quinn = { version = "0.11.6", features = ["runtime-tokio"] }
-rustls = "0.23.16"
+rustls = "0.23.19"
 rcgen = "0.13.1"
-libc = "0.2.162"
+libc = "0.2.167"
 base64 = "0.22.1"
 
 
 #日志处理
-tracing = "0.1.40"
+tracing = "0.1.41"
 tracing-futures = { version = "0.2.5" }
-tracing-subscriber = "0.3.18"
+tracing-subscriber = "0.3.19"
 pretty_env_logger = "0.5.0"
 
 #json序列化
 serde = { version = "1.0.215", features = ["derive"] }
-serde_json = "1.0.132"
+serde_json = "1.0.133"
 pnet = "0.35.0"
 uuid = { version = "1.11.0", features = ["v4"] }

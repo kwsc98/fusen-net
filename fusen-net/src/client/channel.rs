@@ -13,7 +13,7 @@ use tokio::{
 use tracing::{debug, error, info};
 
 use crate::{
-    buffer::{Buffer, QuicBuffer, TcpBuffer, DEFAULT_BUF_SIZE},
+    buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE},
     frame::{Frame, RegisterInfo},
 };
 
@@ -105,7 +105,6 @@ pub async fn register(
                 break;
             }
         }
-        
     });
     Ok(s)
 }
@@ -133,12 +132,13 @@ async fn do_frame(
                             return;
                         }
                     };
-                    let tcp_buffer = TcpBuffer::new(tcp_stream, DEFAULT_BUF_SIZE);
+                    let tcp_buffer = tcp_stream.into_split();
                     let mut quic_buffer =
                         QuicBuffer::new(send_stream, recv_stream, DEFAULT_BUF_SIZE);
                     let _ = quic_buffer
                         .write_frame(&Frame::TargetConnection(connection_info))
                         .await;
+                    let quic_buffer = quic_buffer.split();
                     let (s, _r) = broadcast::channel::<()>(1);
                     let shutdown = Shutdown::new(s.subscribe());
                     let result = crate::buffer::connect(tcp_buffer, quic_buffer, shutdown).await;
