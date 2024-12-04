@@ -34,7 +34,6 @@ async fn tcp_listener(
     async_map: AsyncQuicBufferMap,
 ) -> Result<Sender<()>, BoxError> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await?;
-    println!("{:?}", listener.local_addr());
     let (s, _r) = broadcast::channel::<()>(1);
     let mut shutdown = Shutdown::new(s.subscribe());
     tokio::spawn(async move {

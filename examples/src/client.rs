@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use examples::init_log;
 use fusen_net::{
     client::{self},
@@ -16,14 +14,6 @@ async fn main() {
     let agent = client::Agent::new("127.0.0.1:8089", cert, "fusen-net")
         .await
         .unwrap();
-    let _ = agent
-        .register(
-            RegisterInfo::default()
-                .protocol(0)
-                .target_host("127.0.0.1:8080".to_owned()),
-        )
-        .await;
-    tokio::time::sleep(Duration::from_secs(10)).await;
     let _ = agent
         .register(
             RegisterInfo::default()

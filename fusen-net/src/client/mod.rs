@@ -59,9 +59,8 @@ impl Agent {
 
     async fn send_frame(&self, frame: Frame) -> Result<(), BoxError> {
         let (oneshot_sender, oneshot_recv) = oneshot::channel::<Result<(), BoxError>>();
-        let _ = self.sender.send((frame, oneshot_sender))?;
-        let result = oneshot_recv.await?;
-        result
+        self.sender.send((frame, oneshot_sender))?;
+        oneshot_recv.await?
     }
 }
 
@@ -69,9 +68,8 @@ pub async fn get_connection(
     sender: &UnboundedSender<oneshot::Sender<Result<Connection, BoxError>>>,
 ) -> Result<Connection, BoxError> {
     let (oneshot_sender, oneshot_recv) = oneshot::channel();
-    let _ = sender.send(oneshot_sender)?;
-    let result = oneshot_recv.await?;
-    result
+    sender.send(oneshot_sender)?;
+    oneshot_recv.await?
 }
 
 pub async fn connect_handler(

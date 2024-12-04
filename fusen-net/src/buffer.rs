@@ -69,7 +69,6 @@ impl Buffer for QuicBuffer {
             if 0 == self.recv_stream.read_buf(&mut self.buffer).await? {
                 return Err("connection reset by peer".into());
             }
-            println!("{:?}", self.buffer);
         }
     }
 
