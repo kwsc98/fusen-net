@@ -1,12 +1,13 @@
 use crate::buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE};
 use crate::frame::Frame;
+use crate::quic::Connection;
 use crate::shutdown::Shutdown;
 use crate::utils::map::AsyncQuicBufferMap;
 use crate::ChannelInfo;
 use fusen_common::utils::map::AsyncMap;
 use fusen_common::BoxError;
-use quinn::Connection;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use tokio::sync::mpsc::{self};
 use tracing::debug;
 use tracing::error;
@@ -14,7 +15,6 @@ use tracing::error;
 use super::register;
 
 pub struct Channel {
-    connection: Connection,
     _socket_addr: SocketAddr,
     channel_info: AsyncMap<String, ChannelInfo>,
     _shutdown_complete_tx: mpsc::Sender<()>,
@@ -23,14 +23,12 @@ pub struct Channel {
 
 impl Channel {
     pub fn new(
-        connection: Connection,
         _socket_addr: SocketAddr,
         channel_info: AsyncMap<String, ChannelInfo>,
         _shutdown_complete_tx: mpsc::Sender<()>,
         shutdown: Shutdown,
     ) -> Self {
         Self {
-            connection,
             _socket_addr,
             channel_info,
             _shutdown_complete_tx,
@@ -38,9 +36,8 @@ impl Channel {
         }
     }
 
-    pub async fn run(self) -> Result<(), crate::Error> {
+    pub async fn run(self, connection: impl Connection) -> Result<(), crate::Error> {
         let Channel {
-            connection,
             _socket_addr,
             channel_info,
             _shutdown_complete_tx,

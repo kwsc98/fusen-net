@@ -34,6 +34,7 @@ async fn tcp_listener(
     async_map: AsyncQuicBufferMap,
 ) -> Result<Sender<()>, BoxError> {
     let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await?;
+    info!("{:?}", listener);
     let (s, _r) = broadcast::channel::<()>(1);
     let mut shutdown = Shutdown::new(s.subscribe());
     tokio::spawn(async move {
@@ -69,8 +70,8 @@ async fn tcp_listener(
                 }
                 let quci_buffer = tokio::select! {
                     quic_buffer = recv => quic_buffer,
-                    _ = tokio::time::sleep(Duration::from_millis(1000)) => {
-                        error!("connection timeout : 1000");
+                    _ = tokio::time::sleep(Duration::from_millis(10000)) => {
+                        error!("connection timeout : 10000");
                         let _ = async_map.remove(uuid).await;
                         return;
                     }
@@ -84,7 +85,7 @@ async fn tcp_listener(
                 };
                 let tcp_buffer = tcp_stream.into_split();
                 let quic_buffer = quci_buffer.split();
-                let result = connect(tcp_buffer, quic_buffer, shutdown).await;
+                let result = connect(quic_buffer, tcp_buffer).await;
                 debug!("connect close ~ : {:?}", result);
             });
         }

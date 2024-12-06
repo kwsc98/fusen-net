@@ -1,7 +1,8 @@
+use std::pin::Pin;
+
 use crate::frame::{Frame, FrameError};
 use bytes::BytesMut;
 use fusen_common::{shutdown::Shutdown, BoxError};
-use quinn::{RecvStream, SendStream};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::{error, info};
 
@@ -17,21 +18,32 @@ pub trait Buffer {
 
     async fn write_frame(&mut self, frame: &Frame) -> Result<(), BoxError>;
 
-    fn split(self) -> (RecvStream, SendStream);
+    fn split(
+        self,
+    ) -> (
+        Pin<Box<dyn AsyncRead + Send>>,
+        Pin<Box<dyn AsyncWrite + Send>>,
+    );
 }
 
 pub struct QuicBuffer {
-    send_stream: SendStream,
-    recv_stream: RecvStream,
+    recv_stream: Pin<Box<dyn AsyncRead + Send>>,
+    send_stream: Pin<Box<dyn AsyncWrite + Send>>,
     buffer: BytesMut,
     buffer_size: usize,
 }
 
+unsafe impl Send for QuicBuffer {}
+
 impl QuicBuffer {
-    pub fn new(send_stream: SendStream, recv_stream: RecvStream, buffer_size: usize) -> Self {
+    pub fn new(
+        recv_stream: impl AsyncRead + 'static + Send,
+        send_stream: impl AsyncWrite + 'static + Send,
+        buffer_size: usize,
+    ) -> Self {
         Self {
-            send_stream,
-            recv_stream,
+            recv_stream: Box::pin(recv_stream),
+            send_stream: Box::pin(send_stream),
             buffer: BytesMut::with_capacity(buffer_size),
             buffer_size,
         }
@@ -50,7 +62,7 @@ impl Buffer for QuicBuffer {
     }
 
     async fn write_buf(&mut self, buf: &mut BytesMut) -> Result<(), BoxError> {
-        self.send_stream.write_chunk(buf.split().freeze()).await?;
+        self.send_stream.write_all_buf(buf).await?;
         self.send_stream.flush().await.map_err(|e| e.into())
     }
 
@@ -76,7 +88,12 @@ impl Buffer for QuicBuffer {
         self.write_buf(&mut bytes).await
     }
 
-    fn split(self) -> (RecvStream, SendStream) {
+    fn split(
+        self,
+    ) -> (
+        Pin<Box<dyn AsyncRead + Send>>,
+        Pin<Box<dyn AsyncWrite + Send>>,
+    ) {
         let QuicBuffer {
             send_stream,
             recv_stream,
@@ -88,23 +105,15 @@ impl Buffer for QuicBuffer {
 }
 
 pub async fn connect(
-    (mut r1, mut w1): (
-        impl AsyncRead + std::marker::Unpin,
-        impl AsyncWrite + std::marker::Unpin,
-    ),
+    (mut r1, mut w1): (Pin<Box<dyn AsyncRead + Send>>, Pin<Box<dyn AsyncWrite+ Send>>),
     (mut r2, mut w2): (
         impl AsyncRead + std::marker::Unpin,
         impl AsyncWrite + std::marker::Unpin,
     ),
-    mut shutdown: Shutdown,
 ) -> Result<(), BoxError> {
     let _ = tokio::select! {
         res = io::copy(&mut r1, &mut w2) => res,
         res = io::copy(&mut r2, &mut w1) => res,
-        _ = shutdown.recv() => {
-            info!("connect shutdown");
-            return Ok(());
-        }
     };
     Ok(())
 }

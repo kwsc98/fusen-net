@@ -18,6 +18,7 @@ tokio = { version = "1.42.0", features = ["sync"] }
 bytes = "1.9.0"
 hyper-util = "0.1.10"
 futures = "0.3.31"
+s2n-quic = "1.51.0"
 quinn = { version = "0.11.6", features = ["runtime-tokio"] }
 rustls = "0.23.19"
 rcgen = "0.13.1"
