@@ -1,12 +1,15 @@
-use std::pin::Pin;
-
 use crate::frame::{Frame, FrameError};
 use bytes::BytesMut;
-use fusen_common::{shutdown::Shutdown, BoxError};
+use fusen_common::BoxError;
+use std::pin::Pin;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tracing::{error, info};
+use tracing::error;
 
 pub const DEFAULT_BUF_SIZE: usize = 8 * 1024;
+
+pub type BufferRead = Pin<Box<dyn AsyncRead + Send>>;
+
+pub type BufferWrite = Pin<Box<dyn AsyncWrite + Send>>;
 
 #[allow(async_fn_in_trait)]
 pub trait Buffer {
@@ -18,17 +21,12 @@ pub trait Buffer {
 
     async fn write_frame(&mut self, frame: &Frame) -> Result<(), BoxError>;
 
-    fn split(
-        self,
-    ) -> (
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    );
+    fn split(self) -> (BufferRead, BufferWrite);
 }
 
 pub struct QuicBuffer {
-    recv_stream: Pin<Box<dyn AsyncRead + Send>>,
-    send_stream: Pin<Box<dyn AsyncWrite + Send>>,
+    recv_stream: BufferRead,
+    send_stream: BufferWrite,
     buffer: BytesMut,
     buffer_size: usize,
 }
@@ -88,12 +86,7 @@ impl Buffer for QuicBuffer {
         self.write_buf(&mut bytes).await
     }
 
-    fn split(
-        self,
-    ) -> (
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
-    ) {
+    fn split(self) -> (BufferRead, BufferWrite) {
         let QuicBuffer {
             send_stream,
             recv_stream,
@@ -105,7 +98,10 @@ impl Buffer for QuicBuffer {
 }
 
 pub async fn connect(
-    (mut r1, mut w1): (Pin<Box<dyn AsyncRead + Send>>, Pin<Box<dyn AsyncWrite+ Send>>),
+    (mut r1, mut w1): (
+        impl AsyncRead + std::marker::Unpin,
+        impl AsyncWrite + std::marker::Unpin,
+    ),
     (mut r2, mut w2): (
         impl AsyncRead + std::marker::Unpin,
         impl AsyncWrite + std::marker::Unpin,

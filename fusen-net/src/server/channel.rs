@@ -7,10 +7,10 @@ use crate::ChannelInfo;
 use fusen_common::utils::map::AsyncMap;
 use fusen_common::BoxError;
 use std::net::SocketAddr;
-use std::pin::Pin;
+use std::time::Duration;
 use tokio::sync::mpsc::{self};
-use tracing::debug;
 use tracing::error;
+use tracing::{debug, info};
 
 use super::register;
 
@@ -74,15 +74,23 @@ async fn handler(
         let frame = tokio::select! {
             frame = buffer.read_frame() => frame?,
             frame = recv.recv() => frame.ok_or::<BoxError>("recv frame error".into())?,
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let result = buffer.write_frame(&Frame::Ping).await;
+                if let Err(error) = result {
+                    info!("keep alive error : {:?}",error);
+                }
+                continue;
+            }
         };
+        println!("{:?}", frame);
         match frame {
             Frame::Ping => {
-                if let Err(info) = buffer.write_frame(&Frame::Ack).await {
+                if let Err(info) = buffer.write_frame(&Frame::Ack("ok".to_string())).await {
                     error!("Send Ack Error : {:?}", info);
                 }
             }
-            Frame::Ack => {
-                debug!("Recv Ack");
+            Frame::Ack(msg) => {
+                debug!("Recv Ack : {:?}", msg);
             }
             Frame::Register(register_info) => {
                 let result =
@@ -96,16 +104,19 @@ async fn handler(
                                 ChannelInfo::new(register_info, sender),
                             )
                             .await;
-                        buffer.write_frame(&Frame::Ack).await?;
+                        buffer.write_frame(&Frame::Ack("ok".to_string())).await?;
                     }
-                    Err(error) => error!("register error : {:?}", error),
+                    Err(error) => {
+                        debug!("register error : {:?}", error);
+                        buffer.write_frame(&Frame::Ack(error.to_string())).await?;
+                    }
                 }
             }
             Frame::UnRegister(register_info) => {
                 let _ = channel_info
                     .remove(register_info.get_target_host().to_owned())
                     .await;
-                buffer.write_frame(&Frame::Ack).await?
+                buffer.write_frame(&Frame::Ack("ok".to_string())).await?
             }
             Frame::TargetConnection(connection_info) => {
                 let sender = async_cache

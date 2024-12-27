@@ -1,26 +1,32 @@
-use examples::init_log;
+use examples::CERT_PEM;
+use fusen_common::logs::LogConfig;
 use fusen_net::{
     client::{self},
     frame::RegisterInfo,
+    quic::quin::QuinnEndpoint,
 };
 use structopt::StructOpt;
-use tokio::sync::mpsc;
+use tracing::info;
 
 #[tokio::main]
 async fn main() {
-    init_log();
+    let log_config = LogConfig::default()
+        .devmode(Some(true))
+        .env_filter(Some("client=debug,hyper=debug".to_owned()));
+    let _log_work = fusen_common::logs::init_log(&log_config, "suanleme-agent");
     let _cli = Cli::from_args();
-    let cert = "MIIBXjCCAQSgAwIBAgIUe5OtmYuog9ozO8SLCzIuweYKCC8wCgYIKoZIzj0EAwIwITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDAgFw03NTAxMDEwMDAwMDBaGA80MDk2MDEwMTAwMDAwMFowITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABOnAhz99k/QwGKDGZnd/dSLlL1HjznJBfUH4tmoptsbCGnepbKCe7tIr58RcYpq2zx8nvjCG5Tluj08FB9NTMJGjGDAWMBQGA1UdEQQNMAuCCWZ1c2VuLW5ldDAKBggqhkjOPQQDAgNIADBFAiBdldLdBl7pN/pIlnETjd4lbZYo/SUU/95K+yABYD1fnwIhAKQCPafzFvETqISrld1yde3rV7BJ/rEj+GUtU2IvifEs";
-    let agent = client::Agent::new("127.0.0.1:8089", cert, "fusen-net");
-    let _ = agent
+    info!("start");
+    let agent = client::Agent::new("120.46.75.13:8089", "localhost");
+    let result = agent
         .register(
             RegisterInfo::default()
                 .protocol(0)
-                .target_host("127.0.0.1:8080".to_owned()),
+                .target_host("127.0.0.1:8888".to_owned())
+                .remote_port(Some(1026)),
+            QuinnEndpoint::make_client_endpoint(CERT_PEM).unwrap(),
         )
         .await;
-    let (_s, mut r) = mpsc::channel::<()>(1);
-    r.recv().await;
+    info!("{:?}", result);
 }
 
 #[derive(StructOpt)]

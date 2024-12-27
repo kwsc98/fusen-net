@@ -33,7 +33,8 @@ async fn tcp_listener(
     register_info: RegisterInfo,
     async_map: AsyncQuicBufferMap,
 ) -> Result<Sender<()>, BoxError> {
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:0").await?;
+    let port = register_info.get_remote_port().unwrap_or(0);
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     info!("{:?}", listener);
     let (s, _r) = broadcast::channel::<()>(1);
     let mut shutdown = Shutdown::new(s.subscribe());
@@ -53,7 +54,7 @@ async fn tcp_listener(
             };
             let async_map = async_map.clone();
             let sender = sender.clone();
-            let shutdown = Shutdown::new(m_s.subscribe());
+            let _shutdown = Shutdown::new(m_s.subscribe());
             let target_host = register_info.get_target_host().to_owned();
             tokio::spawn(async move {
                 let uuid = get_uuid();

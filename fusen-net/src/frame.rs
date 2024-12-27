@@ -11,7 +11,7 @@ pub enum FrameError {
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Frame {
     Ping,
-    Ack,
+    Ack(String),
     Register(RegisterInfo),
     UnRegister(RegisterInfo),
     Connection(ConnectionInfo),
@@ -23,6 +23,7 @@ pub struct RegisterInfo {
     info: String,
     //0 tcp 1 udp
     protocol: u16,
+    remote_port: Option<u16>,
     target_host: String,
 }
 
@@ -57,7 +58,7 @@ impl Frame {
             b'-' => Frame::UnRegister(serde_json::from_slice(&buf[6..pointer])?),
             b'!' => match &buf[6..pointer] {
                 b"ping" => Frame::Ping,
-                _ => Frame::Ack,
+                _ => Frame::Ack(serde_json::from_slice(&buf[6..pointer])?),
             },
             _ => return Err(FrameError::Other("parse error".into())),
         };
@@ -80,9 +81,9 @@ impl Frame {
                 bytes.put_u8(b'!');
                 bytes.extend_from_slice(b"ping");
             }
-            Frame::Ack => {
+            Frame::Ack(msg) => {
                 bytes.put_u8(b'!');
-                bytes.extend_from_slice(b"ack");
+                bytes.extend_from_slice(&serde_json::to_vec(msg)?);
             }
             Frame::Register(register_info) => {
                 bytes.put_u8(b'+');
@@ -122,7 +123,7 @@ impl From<serde_json::Error> for FrameError {
 
 #[test]
 fn test() {
-    let frame = Frame::Ack;
+    let frame = Frame::Ack("ok".to_owned());
     let bytes = frame.serialization().unwrap();
     let mut bytes_mut = BytesMut::new();
     bytes_mut.extend_from_slice(bytes.as_ref());

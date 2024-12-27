@@ -1,71 +1,84 @@
+use super::{Connection, Endpoint};
 use fusen_common::BoxError;
 use futures::lock::Mutex;
+use s2n_quic::provider::limits::Limits;
 use s2n_quic::{
     client::Connect,
     connection::{Handle, StreamAcceptor},
     Client, Server,
 };
+use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{error, info};
 
-use super::{Connection, EndPoint};
-
-const CERT_PEM: &str = "-----BEGIN CERTIFICATE-----
-MIICRTCCAeugAwIBAgIUC989yXgvAxWhnaTdCsk8JgYpvzkwCgYIKoZIzj0EAwIw
-gYExCzAJBgNVBAYTAkpQMQ4wDAYDVQQIDAVDaGliYTETMBEGA1UEBwwKQ2hpYmEg
-Q2l0eTEYMBYGA1UECgwPVGVzc2llci1Bc2hwb29sMRAwDgYDVQQDDAdsb2NhbGNh
-MSEwHwYJKoZIhvcNAQkBFhJjYUBkZXZlbG9wLmxvY2FsY2EwIBcNMjQwMzIzMDAz
-NDMxWhgPMjIwMzA4MjkwMDM0MzFaMIGBMQswCQYDVQQGEwJKUDEOMAwGA1UECAwF
-Q2hpYmExEzARBgNVBAcMCkNoaWJhIENpdHkxGDAWBgNVBAoMD1Rlc3NpZXItQXNo
-cG9vbDEQMA4GA1UEAwwHbG9jYWxjYTEhMB8GCSqGSIb3DQEJARYSY2FAZGV2ZWxv
-cC5sb2NhbGNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbrmwtR2bEj/hit5i
-7Vkh1wl3UqAykQFN801EYZC93qUp7XW9OB0U9kMk5K67Qb7239oL678jwtgJdBeo
-DHa6C6M9MDswOQYDVR0RBDIwMIIJbG9jYWxob3N0ggtxbGF3cy5xbGF3c4cEfwAA
-AYcQAAAAAAAAAAAAAAAAAAAAATAKBggqhkjOPQQDAgNIADBFAiAFj6aDZVkJm5v+
-/f1MW9JCaWSdgzREF8wXRy4cWqZp3gIhAKprkqZOpfU4m1PLMuOqoRvnqz/r77uN
-6nK1RbKK1pbF
------END CERTIFICATE-----";
-
-const KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----
-MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRlCQqSxQrvgT3BU7
-xHp9ymk5r0RY2jccZOom+64gEv6hRANCAARuubC1HZsSP+GK3mLtWSHXCXdSoDKR
-AU3zTURhkL3epSntdb04HRT2QyTkrrtBvvbf2gvrvyPC2Al0F6gMdroL
------END PRIVATE KEY-----";
-
-pub fn get_server() -> Result<Server, BoxError> {
+pub fn get_server(cert: &str, priv_key: &str, port: &str) -> Result<Server, BoxError> {
+    let limits = Limits::new()
+        .with_max_open_local_bidirectional_streams(1000)?
+        .with_max_open_remote_bidirectional_streams(1000)?
+        .with_max_idle_timeout(Duration::from_secs(5))?
+        .with_max_keep_alive_period(Duration::from_secs(1))?;
     let server = Server::builder()
-        .with_tls((CERT_PEM, KEY_PEM))?
-        .with_io("0.0.0.0:8089")?
+        .with_tls((cert, priv_key))?
+        .with_io(format!("0.0.0.0:{}", port).as_str())?
+        .with_limits(limits)?
         .start()?;
     Ok(server)
 }
 
-pub fn get_client() -> Result<Client, BoxError> {
+pub fn get_client(cert: &str) -> Result<Client, BoxError> {
+    let limits = Limits::new()
+        .with_max_open_local_bidirectional_streams(1000)?
+        .with_max_open_remote_bidirectional_streams(1000)?
+        .with_max_idle_timeout(Duration::from_secs(5))?
+        .with_max_keep_alive_period(Duration::from_secs(1))?;
     let client = Client::builder()
-        .with_tls(CERT_PEM)?
+        .with_tls(cert)?
         .with_io("0.0.0.0:0")?
+        .with_limits(limits)?
         .start()?;
     Ok(client)
 }
 
 #[derive(Debug)]
-pub enum S2nEndPointInfo {
+pub enum S2nEndpointInfo {
     Server(Mutex<Server>),
     Client(Client),
 }
 
 #[derive(Debug)]
-pub struct S2nEndPoint {
-    pub endpoint: Arc<S2nEndPointInfo>,
+pub struct S2nEndpoint {
+    pub endpoint: Arc<S2nEndpointInfo>,
 }
 
-impl EndPoint for S2nEndPoint {
+impl S2nEndpoint {
+    pub fn make_server_endpoint(
+        bind_port: &str,
+        cert: &str,
+        prik: &str,
+    ) -> Result<impl Endpoint, BoxError> {
+        let server = get_server(cert, prik, bind_port)?;
+        let endpoint = S2nEndpoint {
+            endpoint: Arc::new(S2nEndpointInfo::Server(Mutex::new(server))),
+        };
+        Ok(endpoint)
+    }
+
+    pub fn make_client_endpoint(cert: &str) -> Result<impl Endpoint + 'static, BoxError> {
+        let client = get_client(cert)?;
+        let endpoint = S2nEndpoint {
+            endpoint: Arc::new(S2nEndpointInfo::Client(client)),
+        };
+        Ok(endpoint)
+    }
+}
+
+impl Endpoint for S2nEndpoint {
     fn accept(&self) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
             match endpoint.as_ref() {
-                S2nEndPointInfo::Server(server) => {
+                S2nEndpointInfo::Server(server) => {
                     let mut server = server.lock().await;
                     let mut connection = server.accept().await.ok_or("Connection is none !")?;
                     let _ = connection.keep_alive(true);
@@ -75,7 +88,7 @@ impl EndPoint for S2nEndPoint {
                         acceptor: Arc::new(Mutex::new(acceptor)),
                     })
                 }
-                S2nEndPointInfo::Client(_client) => {
+                S2nEndpointInfo::Client(_client) => {
                     let info: &str = "Client cant accept !";
                     error!(info);
                     Err(info.into())
@@ -92,12 +105,12 @@ impl EndPoint for S2nEndPoint {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
             match endpoint.as_ref() {
-                S2nEndPointInfo::Server(_server) => {
+                S2nEndpointInfo::Server(_server) => {
                     let info: &str = "Server cant connect !";
                     error!(info);
                     Err(info.into())
                 }
-                S2nEndPointInfo::Client(client) => {
+                S2nEndpointInfo::Client(client) => {
                     let mut connection = client
                         .connect(Connect::new(addr).with_server_name(server_name))
                         .await?;

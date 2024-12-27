@@ -1,28 +1,27 @@
-use super::{Connection, EndPoint};
-use base64::{prelude::BASE64_STANDARD, Engine};
+use super::{Connection, Endpoint};
 use fusen_common::BoxError;
-use quinn::{ClientConfig, Endpoint, ServerConfig};
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+use quinn::{ClientConfig, Endpoint as QuicEndpoint, ServerConfig};
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivatePkcs8KeyDer};
 use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[allow(unused)]
 pub fn make_client_endpoint(
     bind_addr: SocketAddr,
-    server_certs: &[&[u8]],
-) -> Result<Endpoint, crate::Error> {
+    server_certs: &[&str],
+) -> Result<QuicEndpoint, crate::Error> {
     let client_cfg = configure_client(server_certs)?;
-    let mut endpoint = Endpoint::client(bind_addr)?;
+    let mut endpoint = QuicEndpoint::client(bind_addr)?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
 
 fn configure_client(
-    server_certs: &[&[u8]],
+    server_certs: &[&str],
 ) -> Result<ClientConfig, Box<dyn Error + Send + Sync + 'static>> {
     let mut certs = rustls::RootCertStore::empty();
     for cert in server_certs {
-        certs.add(CertificateDer::from(*cert))?;
+        certs.add(CertificateDer::from_pem_reader(cert.as_bytes())?)?;
     }
     Ok(ClientConfig::with_root_certificates(Arc::new(certs))?)
 }
@@ -31,14 +30,14 @@ fn configure_client(
 pub fn make_server_endpoint(
     bind_addr: SocketAddr,
     cert: CertifiedKeyV2<'static>,
-) -> Result<Endpoint, crate::Error> {
+) -> Result<QuicEndpoint, crate::Error> {
     let CertifiedKeyV2 { priv_key, cert } = cert;
     let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.keep_alive_interval(Some(Duration::from_millis(1000)));
-    transport_config.max_idle_timeout(Some(Duration::from_millis(2000).try_into()?));
+    transport_config.max_idle_timeout(Some(Duration::from_millis(5000).try_into()?));
     transport_config.max_concurrent_bidi_streams(1000u32.into());
-    let endpoint = Endpoint::server(server_config, bind_addr)?;
+    let endpoint = QuicEndpoint::server(server_config, bind_addr)?;
     Ok(endpoint)
 }
 
@@ -48,8 +47,8 @@ pub struct CertifiedKeyV2<'a> {
 }
 
 pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<'a>, BoxError> {
-    let priv_key = PrivatePkcs8KeyDer::from(BASE64_STANDARD.decode(priv_key)?);
-    let cert = CertificateDer::from(BASE64_STANDARD.decode(cert)?);
+    let priv_key = PrivatePkcs8KeyDer::from_pem_reader(priv_key.as_bytes())?;
+    let cert = CertificateDer::from_pem_reader(cert.as_bytes())?;
     Ok(CertifiedKeyV2 { priv_key, cert })
 }
 
@@ -93,11 +92,34 @@ impl Connection for QuinnConnect {
     }
 }
 
-pub struct QuinnEndPoint {
+pub struct QuinnEndpoint {
     pub endpoint: Arc<quinn::Endpoint>,
 }
 
-impl EndPoint for QuinnEndPoint {
+impl QuinnEndpoint {
+    pub fn make_server_endpoint(
+        bind_port: &str,
+        cert: &str,
+        prik: &str,
+    ) -> Result<impl Endpoint, BoxError> {
+        let bind_addr = format!("0.0.0.0:{}", bind_port).parse()?;
+        let endpoint = make_server_endpoint(bind_addr, generate_signed(prik, cert)?)?;
+        let endpoint = QuinnEndpoint {
+            endpoint: Arc::new(endpoint),
+        };
+        Ok(endpoint)
+    }
+
+    pub fn make_client_endpoint(cert: &str) -> Result<impl Endpoint + 'static, BoxError> {
+        let endpoint = make_client_endpoint("0.0.0.0:0".parse().unwrap(), vec![cert].as_slice())?;
+        let endpoint = QuinnEndpoint {
+            endpoint: Arc::new(endpoint),
+        };
+        Ok(endpoint)
+    }
+}
+
+impl Endpoint for QuinnEndpoint {
     fn accept(&self) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {

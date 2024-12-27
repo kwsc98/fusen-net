@@ -10,25 +10,24 @@ use tracing::{debug, error};
 pub async fn register(connection: impl Connection, info: RegisterInfo) -> Result<(), BoxError> {
     let (send_stream, recv_stram) = connection.open_bi().await?;
     let mut quic_buffer = QuicBuffer::new(send_stream, recv_stram, DEFAULT_BUF_SIZE);
-    let _ = quic_buffer
+    quic_buffer
         .write_frame(&crate::frame::Frame::Register(info.clone()))
-        .await;
+        .await?;
     loop {
         let result = quic_buffer.read_frame().await;
         let frame = match result {
             Ok(frame) => frame,
             Err(error) => {
                 error!("recv frame error : {:?}", error);
-                break;
+                return Err(error);
             }
         };
         let result = do_frame(frame, &mut quic_buffer, &connection).await;
         if let Err(error) = result {
             error!("do_frame error {:?}", error);
-            break;
+            return Err(error);
         }
     }
-    Ok(())
 }
 
 async fn do_frame(
@@ -38,10 +37,14 @@ async fn do_frame(
 ) -> Result<(), BoxError> {
     match frame {
         crate::frame::Frame::Ping => {
-            quic_buffer.write_frame(&crate::frame::Frame::Ack).await?;
+            quic_buffer
+                .write_frame(&crate::frame::Frame::Ack("ok".to_owned()))
+                .await?;
         }
-        crate::frame::Frame::Ack => {
-            debug!("recv Ack")
+        crate::frame::Frame::Ack(msg) => {
+            if msg != "ok" {
+                return Err(msg.into());
+            }
         }
         crate::frame::Frame::Connection(connection_info) => match connect.open_bi().await {
             Ok((send_stream, recv_stream)) => {
