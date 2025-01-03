@@ -1,3 +1,4 @@
+use crate::authentication::Authentication;
 use crate::buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE};
 use crate::frame::Frame;
 use crate::quic::Connection;
@@ -15,6 +16,7 @@ use tracing::{debug, info};
 use super::register;
 
 pub struct Channel {
+    uuid: String,
     _socket_addr: SocketAddr,
     channel_info: AsyncMap<String, ChannelInfo>,
     _shutdown_complete_tx: mpsc::Sender<()>,
@@ -23,12 +25,14 @@ pub struct Channel {
 
 impl Channel {
     pub fn new(
+        uuid: String,
         _socket_addr: SocketAddr,
         channel_info: AsyncMap<String, ChannelInfo>,
         _shutdown_complete_tx: mpsc::Sender<()>,
         shutdown: Shutdown,
     ) -> Self {
         Self {
+            uuid,
             _socket_addr,
             channel_info,
             _shutdown_complete_tx,
@@ -36,8 +40,13 @@ impl Channel {
         }
     }
 
-    pub async fn run(self, connection: impl Connection) -> Result<(), crate::Error> {
+    pub async fn run(
+        self,
+        connection: impl Connection,
+        authentication: impl Authentication,
+    ) -> Result<(), crate::Error> {
         let Channel {
+            uuid,
             _socket_addr,
             channel_info,
             _shutdown_complete_tx,
@@ -53,9 +62,10 @@ impl Channel {
             };
             let async_cache = async_cache.clone();
             let channel_info = channel_info.clone();
+            let uuid = uuid.clone();
             tokio::spawn(async move {
                 let buffer = QuicBuffer::new(send_stream, recv_stream, DEFAULT_BUF_SIZE);
-                let result = handler(buffer, async_cache, channel_info).await;
+                let result = handler(uuid, buffer, async_cache, channel_info, authentication).await;
                 if let Err(error) = result {
                     error!("handler error : {:?}", error);
                 }
@@ -65,9 +75,11 @@ impl Channel {
 }
 
 async fn handler(
+    uuid: String,
     mut buffer: QuicBuffer,
     async_cache: AsyncQuicBufferMap,
     channel_info: AsyncMap<String, ChannelInfo>,
+    authentication: impl Authentication,
 ) -> Result<(), BoxError> {
     let (sender, mut recv) = mpsc::unbounded_channel::<Frame>();
     loop {
@@ -82,7 +94,6 @@ async fn handler(
                 continue;
             }
         };
-        println!("{:?}", frame);
         match frame {
             Frame::Ping => {
                 if let Err(info) = buffer.write_frame(&Frame::Ack("ok".to_string())).await {
@@ -93,16 +104,26 @@ async fn handler(
                 debug!("Recv Ack : {:?}", msg);
             }
             Frame::Register(register_info) => {
+                if let Some(_channel_info) = channel_info.get(uuid.clone()).await {
+                    let info = format!("connection repeat registered");
+                    info!(info);
+                    buffer.write_frame(&Frame::Ack(info)).await?;
+                    continue;
+                }
+                let result = authentication.authentication(&register_info).await;
+                if !result.as_ref().is_ok_and(|e| *e) {
+                    let info = format!("authentication error : {:?}", result);
+                    info!(info);
+                    buffer.write_frame(&Frame::Ack(info)).await?;
+                    continue;
+                }
                 let result =
                     register::register(sender.clone(), register_info.clone(), async_cache.clone())
                         .await;
                 match result {
                     Ok(sender) => {
                         channel_info
-                            .insert(
-                                register_info.get_target_host().to_owned(),
-                                ChannelInfo::new(register_info, sender),
-                            )
+                            .insert(uuid.clone(), ChannelInfo::new(register_info, sender))
                             .await;
                         buffer.write_frame(&Frame::Ack("ok".to_string())).await?;
                     }

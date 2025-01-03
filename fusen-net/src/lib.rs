@@ -12,6 +12,7 @@ pub mod server;
 pub mod shutdown;
 pub mod socket;
 pub mod utils;
+pub mod authentication;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type FusenFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 

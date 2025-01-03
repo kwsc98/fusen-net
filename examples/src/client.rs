@@ -16,12 +16,12 @@ async fn main() {
     let _log_work = fusen_common::logs::init_log(&log_config, "suanleme-agent");
     let _cli = Cli::from_args();
     info!("start");
-    let agent = client::Agent::new("120.46.75.13:8089", "localhost");
+    let agent = client::Agent::new("127.0.0.1:7099", "localhost");
     let result = agent
         .register(
             RegisterInfo::default()
                 .protocol(0)
-                .target_host("127.0.0.1:8888".to_owned())
+                .target_host("127.0.0.1:7099".to_owned())
                 .remote_port(Some(1026)),
             QuinnEndpoint::make_client_endpoint(CERT_PEM).unwrap(),
         )
