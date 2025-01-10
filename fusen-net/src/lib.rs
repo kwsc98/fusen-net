@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local};
 use frame::RegisterInfo;
 use fusen_common::fusen_procedural_macro::Data;
 use serde::{Deserialize, Serialize};
@@ -27,16 +28,24 @@ pub enum Protocol {
     V6,
 }
 
-#[derive(Clone, Data)]
+#[derive(Clone, Data, Debug)]
 pub struct ChannelInfo {
     register_info: Arc<RegisterInfo>,
+    remote_port: u16,
+    begin_time: DateTime<Local>,
     sender: broadcast::Sender<()>,
 }
 
 impl ChannelInfo {
-    pub fn new(register_info: Arc<RegisterInfo>, sender: broadcast::Sender<()>) -> Self {
+    pub fn new(
+        remote_port: u16,
+        register_info: Arc<RegisterInfo>,
+        sender: broadcast::Sender<()>,
+    ) -> Self {
         Self {
+            remote_port,
             register_info,
+            begin_time: Local::now(),
             sender,
         }
     }

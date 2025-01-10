@@ -91,9 +91,9 @@ impl Frame {
         let len = bytes.len();
         let mut head: BytesMut = BytesMut::with_capacity(5 + len);
         head.put_u8(b'0');
-        let le_bytes = len.to_le_bytes();
-        for idx in (0..4).rev() {
-            head.put_u8(le_bytes[idx]);
+        let le_bytes = len.to_be_bytes();
+        for item in le_bytes.iter().skip(4) {
+            head.put_u8(*item);
         }
         head.unsplit(bytes);
         Ok(head)

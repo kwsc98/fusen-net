@@ -12,7 +12,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{error, info};
 
-pub fn get_server(cert: &str, priv_key: &str, port: &str) -> Result<Server, BoxError> {
+pub fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxError> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
@@ -53,7 +53,7 @@ pub struct S2nEndpoint {
 
 impl S2nEndpoint {
     pub fn make_server_endpoint(
-        bind_port: &str,
+        bind_port: u16,
         cert: &str,
         prik: &str,
     ) -> Result<impl Endpoint, BoxError> {

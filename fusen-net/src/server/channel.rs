@@ -1,3 +1,4 @@
+use super::register;
 use crate::authentication::Authentication;
 use crate::buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE};
 use crate::frame::Frame;
@@ -13,8 +14,6 @@ use std::time::Duration;
 use tokio::sync::mpsc::{self};
 use tracing::error;
 use tracing::{debug, info};
-
-use super::register;
 
 pub struct Channel {
     uuid: String,
@@ -79,7 +78,7 @@ async fn handler(
     uuid: String,
     mut buffer: QuicBuffer,
     async_cache: AsyncQuicBufferMap,
-    channel_info: AsyncMap<String, ChannelInfo>,
+    channel_cache: AsyncMap<String, ChannelInfo>,
     authentication: impl Authentication,
 ) -> Result<(), BoxError> {
     let (sender, mut recv) = mpsc::unbounded_channel::<Frame>();
@@ -88,7 +87,10 @@ async fn handler(
             frame = buffer.read_frame() => frame?,
             frame = recv.recv() => frame.ok_or::<BoxError>("recv frame error".into())?,
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                let _result = buffer.write_frame(&Frame::Ping).await?;
+                let result = buffer.write_frame(&Frame::Ping).await;
+                if let Err(error) = result {
+                    info!("keep alive error : {:?}",error);
+                }
                 continue;
             }
         };
@@ -102,8 +104,8 @@ async fn handler(
                 debug!("Recv Ack : {:?}", msg);
             }
             Frame::Register(register_info) => {
-                if let Some(_channel_info) = channel_info.get(uuid.clone()).await {
-                    let info = format!("connection repeat registered");
+                if let Some(_channel_info) = channel_cache.get(uuid.clone()).await {
+                    let info = "connection repeat registered".to_string();
                     info!(info);
                     buffer.write_frame(&Frame::Ack(info)).await?;
                     continue;
@@ -120,10 +122,8 @@ async fn handler(
                     register::register(sender.clone(), register_info.clone(), async_cache.clone())
                         .await;
                 match result {
-                    Ok(sender) => {
-                        channel_info
-                            .insert(uuid.clone(), ChannelInfo::new(register_info, sender))
-                            .await;
+                    Ok(channel_info) => {
+                        channel_cache.insert(uuid.clone(), channel_info).await;
                         buffer.write_frame(&Frame::Ack("ok".to_string())).await?;
                     }
                     Err(error) => {

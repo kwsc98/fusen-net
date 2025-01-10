@@ -98,7 +98,7 @@ pub struct QuinnEndpoint {
 
 impl QuinnEndpoint {
     pub fn make_server_endpoint(
-        bind_port: &str,
+        bind_port: u16,
         cert: &str,
         prik: &str,
     ) -> Result<impl Endpoint, BoxError> {

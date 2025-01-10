@@ -18,9 +18,9 @@ impl Server {
     pub async fn start(
         endpoint: impl Endpoint,
         authentication: impl Authentication,
+        channel_info: AsyncMap<String, ChannelInfo>,
     ) -> Result<(), crate::Error> {
         let (shutdown_complete_tx, mut shutdown_complete_rx) = mpsc::channel(1);
-        let channel_info: AsyncMap<String, ChannelInfo> = AsyncMap::new();
         let notify_shutdown: Sender<()> = broadcast::channel(1).0;
         info!("server start");
         loop {
