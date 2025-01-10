@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{
     buffer::{Buffer, QuicBuffer, DEFAULT_BUF_SIZE},
     frame::{Frame, RegisterInfo},
@@ -5,7 +7,7 @@ use crate::{
 };
 use fusen_common::BoxError;
 use tokio::net::TcpStream;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 pub async fn register(connection: impl Connection, info: RegisterInfo) -> Result<(), BoxError> {
     let (send_stream, recv_stram) = connection.open_bi().await?;
@@ -14,7 +16,13 @@ pub async fn register(connection: impl Connection, info: RegisterInfo) -> Result
         .write_frame(&crate::frame::Frame::Register(info.clone()))
         .await?;
     loop {
-        let result = quic_buffer.read_frame().await;
+        let result = tokio::select! {
+            frame = quic_buffer.read_frame() => frame,
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                let _ = quic_buffer.write_frame(&Frame::Ping).await?;
+                continue;
+            }
+        };
         let frame = match result {
             Ok(frame) => frame,
             Err(error) => {

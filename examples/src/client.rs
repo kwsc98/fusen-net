@@ -1,9 +1,9 @@
 use examples::CERT_PEM;
-use fusen_common::logs::LogConfig;
+use fusen_common::log::LogConfig;
 use fusen_net::{
     client::{self},
     frame::RegisterInfo,
-    quic::quin::QuinnEndpoint,
+    quic::{quin::QuinnEndpoint, s2n::S2nEndpoint},
 };
 use structopt::StructOpt;
 use tracing::info;
@@ -13,10 +13,10 @@ async fn main() {
     let log_config = LogConfig::default()
         .devmode(Some(true))
         .env_filter(Some("client=debug,hyper=debug".to_owned()));
-    let _log_work = fusen_common::logs::init_log(&log_config, "suanleme-agent");
+    let _log_work = fusen_common::log::init_log(&log_config, "suanleme-agent");
     let _cli = Cli::from_args();
     info!("start");
-    let agent = client::Agent::new("127.0.0.1:7099", "localhost");
+    let agent = client::Agent::new("120.46.75.13:8089", "localhost");
     let result = agent
         .register(
             RegisterInfo::default()

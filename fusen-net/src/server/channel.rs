@@ -8,6 +8,7 @@ use crate::ChannelInfo;
 use fusen_common::utils::map::AsyncMap;
 use fusen_common::BoxError;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{self};
 use tracing::error;
@@ -87,10 +88,7 @@ async fn handler(
             frame = buffer.read_frame() => frame?,
             frame = recv.recv() => frame.ok_or::<BoxError>("recv frame error".into())?,
             _ = tokio::time::sleep(Duration::from_secs(5)) => {
-                let result = buffer.write_frame(&Frame::Ping).await;
-                if let Err(error) = result {
-                    info!("keep alive error : {:?}",error);
-                }
+                let _result = buffer.write_frame(&Frame::Ping).await?;
                 continue;
             }
         };
@@ -110,7 +108,8 @@ async fn handler(
                     buffer.write_frame(&Frame::Ack(info)).await?;
                     continue;
                 }
-                let result = authentication.authentication(&register_info).await;
+                let register_info = Arc::new(register_info);
+                let result = authentication.authentication(register_info.clone()).await;
                 if !result.as_ref().is_ok_and(|e| *e) {
                     let info = format!("authentication error : {:?}", result);
                     info!(info);
@@ -132,12 +131,6 @@ async fn handler(
                         buffer.write_frame(&Frame::Ack(error.to_string())).await?;
                     }
                 }
-            }
-            Frame::UnRegister(register_info) => {
-                let _ = channel_info
-                    .remove(register_info.get_target_host().to_owned())
-                    .await;
-                buffer.write_frame(&Frame::Ack("ok".to_string())).await?
             }
             Frame::TargetConnection(connection_info) => {
                 let sender = async_cache

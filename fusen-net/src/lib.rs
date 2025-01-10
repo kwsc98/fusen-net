@@ -1,8 +1,9 @@
 use frame::RegisterInfo;
 use fusen_common::fusen_procedural_macro::Data;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::broadcast;
+pub mod authentication;
 pub mod buffer;
 pub mod client;
 pub mod common;
@@ -12,7 +13,6 @@ pub mod server;
 pub mod shutdown;
 pub mod socket;
 pub mod utils;
-pub mod authentication;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type FusenFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
@@ -29,12 +29,12 @@ pub enum Protocol {
 
 #[derive(Clone, Data)]
 pub struct ChannelInfo {
-    register_info: RegisterInfo,
+    register_info: Arc<RegisterInfo>,
     sender: broadcast::Sender<()>,
 }
 
 impl ChannelInfo {
-    pub fn new(register_info: RegisterInfo, sender: broadcast::Sender<()>) -> Self {
+    pub fn new(register_info: Arc<RegisterInfo>, sender: broadcast::Sender<()>) -> Self {
         Self {
             register_info,
             sender,

@@ -13,7 +13,6 @@ pub enum Frame {
     Ping,
     Ack(String),
     Register(RegisterInfo),
-    UnRegister(RegisterInfo),
     Connection(ConnectionInfo),
     TargetConnection(ConnectionInfo),
 }
@@ -55,7 +54,6 @@ impl Frame {
             b'*' => Frame::Connection(serde_json::from_slice(&buf[6..pointer])?),
             b'&' => Frame::TargetConnection(serde_json::from_slice(&buf[6..pointer])?),
             b'+' => Frame::Register(serde_json::from_slice(&buf[6..pointer])?),
-            b'-' => Frame::UnRegister(serde_json::from_slice(&buf[6..pointer])?),
             b'!' => match &buf[6..pointer] {
                 b"ping" => Frame::Ping,
                 _ => Frame::Ack(serde_json::from_slice(&buf[6..pointer])?),
@@ -87,10 +85,6 @@ impl Frame {
             }
             Frame::Register(register_info) => {
                 bytes.put_u8(b'+');
-                bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
-            }
-            Frame::UnRegister(register_info) => {
-                bytes.put_u8(b'-');
                 bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
             }
         }
