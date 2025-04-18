@@ -1,24 +1,23 @@
 use super::{Connection, Endpoint};
-use fusen_common::BoxError;
+use crate::common::{BoxError, ConnectError};
+use futures::future::BoxFuture;
 use quinn::{ClientConfig, Endpoint as QuicEndpoint, ServerConfig};
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivatePkcs8KeyDer};
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem, pem::PemObject};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[allow(unused)]
-pub fn make_client_endpoint(
+fn make_client_endpoint(
     bind_addr: SocketAddr,
     server_certs: &[&str],
-) -> Result<QuicEndpoint, crate::Error> {
+) -> Result<QuicEndpoint, BoxError> {
     let client_cfg = configure_client(server_certs)?;
     let mut endpoint = QuicEndpoint::client(bind_addr)?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
 
-fn configure_client(
-    server_certs: &[&str],
-) -> Result<ClientConfig, Box<dyn Error + Send + Sync + 'static>> {
+fn configure_client(server_certs: &[&str]) -> Result<ClientConfig, BoxError> {
     let mut certs = rustls::RootCertStore::empty();
     for cert in server_certs {
         certs.add(CertificateDer::from_pem_reader(cert.as_bytes())?)?;
@@ -27,10 +26,10 @@ fn configure_client(
 }
 
 #[allow(unused)]
-pub fn make_server_endpoint(
+fn make_server_endpoint(
     bind_addr: SocketAddr,
     cert: CertifiedKeyV2<'static>,
-) -> Result<QuicEndpoint, crate::Error> {
+) -> Result<QuicEndpoint, BoxError> {
     let CertifiedKeyV2 { priv_key, cert } = cert;
     let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
@@ -46,7 +45,7 @@ pub struct CertifiedKeyV2<'a> {
     cert: CertificateDer<'a>,
 }
 
-pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<'a>, BoxError> {
+pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<'a>, pem::Error> {
     let priv_key = PrivatePkcs8KeyDer::from_pem_reader(priv_key.as_bytes())?;
     let cert = CertificateDer::from_pem_reader(cert.as_bytes())?;
     Ok(CertifiedKeyV2 { priv_key, cert })
@@ -60,9 +59,8 @@ pub struct QuinnConnect {
 impl Connection for QuinnConnect {
     fn open_bi(
         &self,
-    ) -> fusen_common::FusenFuture<
-        Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), BoxError>,
-    > {
+    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
+    {
         let connect = self.connect.clone();
         Box::pin(async move {
             let (send_stream, recv_stream) = connect.open_bi().await?;
@@ -72,9 +70,8 @@ impl Connection for QuinnConnect {
 
     fn accept_bi(
         &self,
-    ) -> fusen_common::FusenFuture<
-        Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), BoxError>,
-    > {
+    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
+    {
         let connect = self.connect.clone();
         Box::pin(async move {
             let (send_stream, recv_stream) = connect.accept_bi().await?;
@@ -82,13 +79,16 @@ impl Connection for QuinnConnect {
         })
     }
 
-    fn closed(&self) -> fusen_common::FusenFuture<BoxError> {
-        let connect = self.connect.clone();
-        Box::pin(async move { connect.closed().await.into() })
-    }
-
     fn remote_address(&self) -> SocketAddr {
         self.connect.remote_address()
+    }
+
+    fn closed(&self) -> BoxFuture<ConnectError> {
+        let connect = self.connect.clone();
+        Box::pin(async move {
+            connect.closed().await;
+            ConnectError::ConnectClose
+        })
     }
 }
 
@@ -120,10 +120,10 @@ impl QuinnEndpoint {
 }
 
 impl Endpoint for QuinnEndpoint {
-    fn accept(&self) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
+    fn accept(&self) -> BoxFuture<Result<impl Connection, ConnectError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
-            let connect = endpoint.accept().await.ok_or("incoming is none !")?;
+            let connect = endpoint.accept().await.ok_or(ConnectError::EndpointClose)?;
             let connect = connect.await?;
             Ok(QuinnConnect { connect })
         })
@@ -133,7 +133,7 @@ impl Endpoint for QuinnEndpoint {
         &self,
         addr: SocketAddr,
         server_name: String,
-    ) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
+    ) -> BoxFuture<Result<impl Connection, ConnectError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
             let connect = endpoint.connect(addr, &server_name)?.await?;

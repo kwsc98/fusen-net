@@ -8,27 +8,26 @@ description.workspace = true
 
 
 [dependencies]
-fusen-common.workspace = true
 #网络协议处理
-tokio.workspace = true
-bytes.workspace = true
-futures.workspace = true
-hyper-util.workspace = true
-s2n-quic.workspace = true
-quinn.workspace = true
-rustls.workspace = true
-rcgen.workspace = true
-libc.workspace = true
-base64.workspace = true
+tokio = "1.44.2"
+bytes = "1.10.1"
+hyper-util = "0.1.11"
+futures = "0.3.31"
+s2n-quic = "1.57.0"
+quinn = { version = "0.11.7", features = ["runtime-tokio"] }
+rustls = "0.23.26"
+rcgen = "0.13.2"
 
 #日志处理
-tracing.workspace = true
-tracing-futures.workspace = true
-tracing-subscriber.workspace = true
-pretty_env_logger.workspace = true
-chrono.workspace = true
+tracing = "0.1.41"
+tracing-futures = { version = "0.2.5" }
+tracing-subscriber = "0.3.19"
+pretty_env_logger = "0.5.0"
+chrono = "0.4.40"
 
-#json处理
-serde.workspace = true
-serde_json.workspace = true
-uuid.workspace = true
+#json序列化
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+pnet = "0.35.0"
+uuid = { version = "1.16.0", features = ["v4"] }
+thiserror = "2.0.12"

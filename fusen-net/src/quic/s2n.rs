@@ -1,18 +1,20 @@
+use crate::common::{BoxError, ConnectError};
+
 use super::{Connection, Endpoint};
-use fusen_common::BoxError;
+use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use s2n_quic::provider::limits::Limits;
 use s2n_quic::{
+    Client, Server,
     client::Connect,
     connection::{Handle, StreamAcceptor},
-    Client, Server,
 };
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::{error, info};
+use tracing::info;
 
-pub fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxError> {
+fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxError> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
@@ -26,7 +28,7 @@ pub fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxEr
     Ok(server)
 }
 
-pub fn get_client(cert: &str) -> Result<Client, BoxError> {
+fn get_client(cert: &str) -> Result<Client, BoxError> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
@@ -74,13 +76,14 @@ impl S2nEndpoint {
 }
 
 impl Endpoint for S2nEndpoint {
-    fn accept(&self) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
+    fn accept(&self) -> BoxFuture<Result<impl Connection, ConnectError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
             match endpoint.as_ref() {
                 S2nEndpointInfo::Server(server) => {
                     let mut server = server.lock().await;
-                    let mut connection = server.accept().await.ok_or("Connection is none !")?;
+                    let mut connection =
+                        server.accept().await.ok_or(ConnectError::EndpointClose)?;
                     let _ = connection.keep_alive(true);
                     let (handle, acceptor) = connection.split();
                     Ok(S2nConnect {
@@ -89,9 +92,7 @@ impl Endpoint for S2nEndpoint {
                     })
                 }
                 S2nEndpointInfo::Client(_client) => {
-                    let info: &str = "Client cant accept !";
-                    error!(info);
-                    Err(info.into())
+                    panic!("client cant accept !")
                 }
             }
         })
@@ -101,14 +102,12 @@ impl Endpoint for S2nEndpoint {
         &self,
         addr: SocketAddr,
         server_name: String,
-    ) -> fusen_common::FusenFuture<Result<impl Connection, BoxError>> {
+    ) -> BoxFuture<Result<impl Connection, ConnectError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {
             match endpoint.as_ref() {
                 S2nEndpointInfo::Server(_server) => {
-                    let info: &str = "Server cant connect !";
-                    error!(info);
-                    Err(info.into())
+                    panic!("server cant connect !")
                 }
                 S2nEndpointInfo::Client(client) => {
                     let mut connection = client
@@ -135,9 +134,8 @@ pub struct S2nConnect {
 impl Connection for S2nConnect {
     fn open_bi(
         &self,
-    ) -> fusen_common::FusenFuture<
-        Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), BoxError>,
-    > {
+    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
+    {
         let mut connect = self.handle.clone();
         Box::pin(async move {
             let (recv_stream, send_stream) = connect.open_bidirectional_stream().await?.split();
@@ -147,16 +145,15 @@ impl Connection for S2nConnect {
 
     fn accept_bi(
         &self,
-    ) -> fusen_common::FusenFuture<
-        Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), BoxError>,
-    > {
+    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
+    {
         let acceptor = self.acceptor.clone();
         Box::pin(async move {
             let mut connect = acceptor.lock().await;
             let (recv_stream, send_stream) = connect
                 .accept_bidirectional_stream()
                 .await?
-                .ok_or("bistream is none !")?
+                .ok_or(ConnectError::EndpointClose)?
                 .split();
             Ok((recv_stream, send_stream))
         })
@@ -166,7 +163,7 @@ impl Connection for S2nConnect {
         self.handle.remote_addr().unwrap()
     }
 
-    fn closed(&self) -> fusen_common::FusenFuture<BoxError> {
+    fn closed(&self) -> BoxFuture<ConnectError> {
         let mut connect = self.handle.clone();
         Box::pin(async move {
             if let Ok(stream) = connect.open_bidirectional_stream().await {
@@ -174,7 +171,7 @@ impl Connection for S2nConnect {
                 let result = recv_stream.receive().await;
                 info!("closed result : {:?}", result);
             }
-            "connect close !".into()
+            ConnectError::ConnectClose
         })
     }
 }
