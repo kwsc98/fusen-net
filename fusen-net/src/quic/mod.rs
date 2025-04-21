@@ -3,6 +3,7 @@ use futures::future::BoxFuture;
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+pub mod gm_quic;
 pub mod quin;
 pub mod s2n;
 

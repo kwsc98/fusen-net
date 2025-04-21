@@ -14,3 +14,9 @@ path = "src/client.rs"
 name = "server"
 path = "src/server.rs"
 
+[dependencies]
+tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
+tracing-subscriber = "0.3.19"
+tracing = "0.1.41"
+
+fusen-net = { path = "../fusen-net" }

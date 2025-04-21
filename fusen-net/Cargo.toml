@@ -9,11 +9,12 @@ description.workspace = true
 
 [dependencies]
 #网络协议处理
-tokio = "1.44.2"
+tokio = { version = "1.44.2", features = ["sync", "io-util"] }
 bytes = "1.10.1"
 hyper-util = "0.1.11"
 futures = "0.3.31"
 s2n-quic = "1.57.0"
+gm-quic = "0.2.1"
 quinn = { version = "0.11.7", features = ["runtime-tokio"] }
 rustls = "0.23.26"
 rcgen = "0.13.2"

@@ -1,5 +1,7 @@
 use std::error::Error;
 
+pub mod token;
+
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]

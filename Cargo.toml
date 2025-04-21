@@ -1,5 +1,5 @@
 [workspace]
-members = ["fusen-net"]
+members = ["fusen-net","examples"]
 resolver = "2"
 
 [workspace.package]
