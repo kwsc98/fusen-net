@@ -1,10 +1,10 @@
-use std::error::Error;
+use std::{error::Error, io};
 
 pub mod token;
 
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
 
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     #[error("quinn_connection_error : {0}")]
     QuinnConnectionError(quinn::ConnectionError),
@@ -14,6 +14,9 @@ pub enum ConnectError {
 
     #[error("s2n_quic_connect_error : {0}")]
     S2nConnectError(s2n_quic::connection::Error),
+
+    #[error("gm_quic_connect_error : {0}")]
+    GmQuicConnectError(io::Error),
 
     #[error("endpoint close !")]
     EndpointClose,

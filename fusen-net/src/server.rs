@@ -48,28 +48,29 @@ impl NetServer {
                             let async_map = async_map.clone();
                             tokio::spawn(async move {
                                 while let Some(connect_request) = recv.recv().await {
-                                    if buffer
+                                    let mut w_map = async_map.lock().await;
+                                    w_map.insert(
+                                        connect_request.token.clone(),
+                                        connect_request.one_sender,
+                                    );
+                                    drop(w_map);
+                                    let async_map = async_map.clone();
+                                    let token = connect_request.token.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(Duration::from_millis(5000)).await;
+                                        let mut w_map = async_map.lock().await;
+                                        w_map.remove(&token);
+                                        drop(w_map);
+                                    });
+                                    if let Err(error) = buffer
                                         .write_frame(&crate::frame::Frame::Connection(
                                             crate::frame::Connection {
                                                 token: connect_request.token.clone(),
                                             },
                                         ))
                                         .await
-                                        .is_ok()
                                     {
-                                        let mut w_map = async_map.lock().await;
-                                        w_map.insert(
-                                            connect_request.token.clone(),
-                                            connect_request.one_sender,
-                                        );
-                                        drop(w_map);
-                                        let async_map = async_map.clone();
-                                        tokio::spawn(async move {
-                                            tokio::time::sleep(Duration::from_millis(5000)).await;
-                                            let mut w_map = async_map.lock().await;
-                                            w_map.remove(&connect_request.token);
-                                            drop(w_map);
-                                        });
+                                        error!("send Connection error ! : {:?}", error);
                                     }
                                 }
                             });
@@ -92,6 +93,6 @@ impl NetServer {
                 }
             });
         }
-        todo!()
+        Ok(())
     }
 }

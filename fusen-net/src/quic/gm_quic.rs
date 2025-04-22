@@ -1,45 +1,17 @@
 use super::{Connection, Endpoint};
 use crate::common::{BoxError, ConnectError};
 use futures::future::BoxFuture;
-use gm_quic::QuicServer;
-use quinn::{ClientConfig, Endpoint as QuicEndpoint, ServerConfig};
-use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem, pem::PemObject};
+use gm_quic::{ClientParameters, Connection as QuicConnect, QuicClient};
+use gm_quic::{QuicServer, ServerParameters};
+use rustls::RootCertStore;
+use rustls::crypto::ring::default_provider;
+use rustls::pki_types::{
+    CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer,
+    pem::{self, PemObject},
+};
+use std::io;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::io::{AsyncRead, AsyncWrite};
-
-#[allow(unused)]
-fn make_client_endpoint(
-    bind_addr: SocketAddr,
-    server_certs: &[&str],
-) -> Result<QuicEndpoint, BoxError> {
-    let client_cfg = configure_client(server_certs)?;
-    let mut endpoint = QuicEndpoint::client(bind_addr)?;
-    endpoint.set_default_client_config(client_cfg);
-    Ok(endpoint)
-}
-
-fn configure_client(server_certs: &[&str]) -> Result<ClientConfig, BoxError> {
-    let mut certs = rustls::RootCertStore::empty();
-    for cert in server_certs {
-        certs.add(CertificateDer::from_pem_reader(cert.as_bytes())?)?;
-    }
-    Ok(ClientConfig::with_root_certificates(Arc::new(certs))?)
-}
-
-#[allow(unused)]
-fn make_server_endpoint(
-    bind_addr: SocketAddr,
-    cert: CertifiedKeyV2<'static>,
-) -> Result<QuicEndpoint, BoxError> {
-    let CertifiedKeyV2 { priv_key, cert } = cert;
-    let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
-    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.keep_alive_interval(Some(Duration::from_millis(1000)));
-    transport_config.max_idle_timeout(Some(Duration::from_millis(5000).try_into()?));
-    transport_config.max_concurrent_bidi_streams(1000u32.into());
-    let endpoint = QuicEndpoint::server(server_config, bind_addr)?;
-    Ok(endpoint)
-}
 
 pub struct CertifiedKeyV2<'a> {
     priv_key: PrivatePkcs8KeyDer<'a>,
@@ -52,19 +24,27 @@ pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<
     Ok(CertifiedKeyV2 { priv_key, cert })
 }
 
-#[derive(Debug)]
-pub struct QuinnConnect {
-    connect: quinn::Connection,
+pub struct GmQuicConnect {
+    connect: Arc<QuicConnect>,
+    remote_address: SocketAddr,
 }
 
-impl Connection for QuinnConnect {
+impl Connection for GmQuicConnect {
     fn open_bi(
         &self,
     ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
     {
         let connect = self.connect.clone();
         Box::pin(async move {
-            let (send_stream, recv_stream) = connect.open_bi().await?;
+            let stream = match connect.open_bi_stream().await {
+                Ok(stream) => stream,
+                Err(error) => return Err(ConnectError::GmQuicConnectError(error)),
+            };
+            let Some((_stream_id, (recv_stream, send_stream))) = stream else {
+                return Err(ConnectError::GmQuicConnectError(io::Error::other(
+                    "open_bi error !",
+                )));
+            };
             Ok((recv_stream, send_stream))
         })
     }
@@ -75,59 +55,92 @@ impl Connection for QuinnConnect {
     {
         let connect = self.connect.clone();
         Box::pin(async move {
-            let (send_stream, recv_stream) = connect.accept_bi().await?;
+            let stream = match connect.accept_bi_stream().await {
+                Ok(stream) => stream,
+                Err(error) => return Err(ConnectError::GmQuicConnectError(error)),
+            };
+            let Some((_stream_id, (recv_stream, send_stream))) = stream else {
+                return Err(ConnectError::GmQuicConnectError(io::Error::other(
+                    "open_bi error !",
+                )));
+            };
             Ok((recv_stream, send_stream))
         })
     }
 
     fn remote_address(&self) -> SocketAddr {
-        self.connect.remote_address()
+        self.remote_address
     }
 
     fn closed(&self) -> BoxFuture<ConnectError> {
         let connect = self.connect.clone();
         Box::pin(async move {
-            connect.closed().await;
+            connect.close("done".into(), 0);
             ConnectError::ConnectClose
         })
     }
 }
 
-pub struct QuinnEndpoint {
-    pub endpoint: Arc<quinn::Endpoint>,
+pub struct GmQuicEndpoint {
+    pub server: Option<Arc<QuicServer>>,
+    pub client: Option<Arc<QuicClient>>,
 }
 
-impl QuinnEndpoint {
+impl GmQuicEndpoint {
     pub fn make_server_endpoint(
         bind_port: u16,
         cert: &str,
         prik: &str,
     ) -> Result<impl Endpoint, BoxError> {
-        let bind_addr = format!("0.0.0.0:{}", bind_port).parse()?;
-        let quic = QuicServer::builder().without_client_cert_verifier().with_single_cert(cert_chain, key_der);
-        let endpoint = make_server_endpoint(bind_addr, generate_signed(prik, cert)?)?;
-        let endpoint = QuinnEndpoint {
-            endpoint: Arc::new(endpoint),
-        };
-        Ok(endpoint)
+        let _ = default_provider().install_default();
+        let certifie_key = generate_signed(prik, cert)?;
+        let endpoint: Arc<QuicServer> = QuicServer::builder()
+            .without_client_cert_verifier()
+            .with_single_cert(
+                vec![certifie_key.cert],
+                PrivateKeyDer::Pkcs8(certifie_key.priv_key),
+            )
+            .with_parameters(server_parameters())
+            .listen(format!("0.0.0.0:{}", bind_port).parse::<SocketAddr>()?)?;
+        Ok(GmQuicEndpoint {
+            server: Some(endpoint),
+            client: None,
+        })
     }
 
     pub fn make_client_endpoint(cert: &str) -> Result<impl Endpoint + 'static, BoxError> {
-        let endpoint = make_client_endpoint("0.0.0.0:0".parse().unwrap(), vec![cert].as_slice())?;
-        let endpoint = QuinnEndpoint {
-            endpoint: Arc::new(endpoint),
-        };
-        Ok(endpoint)
+        let _ = default_provider().install_default();
+        let cert = CertificateDer::from_pem_reader(cert.as_bytes())?;
+        let mut roots = RootCertStore::empty();
+        roots.add_parsable_certificates(vec![cert]);
+        let client = QuicClient::builder()
+            .with_root_certificates(roots)
+            .without_cert()
+            .with_parameters(client_parameters())
+            .reuse_connection()
+            .build();
+        Ok(GmQuicEndpoint {
+            server: None,
+            client: Some(Arc::new(client)),
+        })
     }
 }
 
-impl Endpoint for QuinnEndpoint {
+impl Endpoint for GmQuicEndpoint {
     fn accept(&self) -> BoxFuture<Result<impl Connection, ConnectError>> {
-        let endpoint = self.endpoint.clone();
+        let server = self.server.clone();
         Box::pin(async move {
-            let connect = endpoint.accept().await.ok_or(ConnectError::EndpointClose)?;
-            let connect = connect.await?;
-            Ok(QuinnConnect { connect })
+            let Some(server) = server else {
+                return Err(ConnectError::EndpointClose);
+            };
+            let (connect, addr) = server
+                .accept()
+                .await
+                .map_err(ConnectError::GmQuicConnectError)?;
+            Ok(GmQuicConnect {
+                connect,
+                remote_address: addr.remote().addr(),
+            })
         })
     }
 
@@ -136,10 +149,41 @@ impl Endpoint for QuinnEndpoint {
         addr: SocketAddr,
         server_name: String,
     ) -> BoxFuture<Result<impl Connection, ConnectError>> {
-        let endpoint = self.endpoint.clone();
+        let client = self.client.clone();
         Box::pin(async move {
-            let connect = endpoint.connect(addr, &server_name)?.await?;
-            Ok(QuinnConnect { connect })
+            let Some(client) = client else {
+                return Err(ConnectError::EndpointClose);
+            };
+            let connect = client
+                .connect(&server_name, addr)
+                .map_err(ConnectError::GmQuicConnectError)?;
+            Ok(GmQuicConnect {
+                connect,
+                remote_address: addr,
+            })
         })
     }
+}
+
+pub fn server_parameters() -> ServerParameters {
+    let mut params = ServerParameters::default();
+    params.set_initial_max_streams_bidi(1000u32);
+    params.set_initial_max_streams_uni(1000u32);
+    params.set_initial_max_data(1u32 << 20);
+    params.set_initial_max_stream_data_uni(1u32 << 20);
+    params.set_initial_max_stream_data_bidi_local(1u32 << 20);
+    params.set_initial_max_stream_data_bidi_remote(1u32 << 20);
+    params.set_max_idle_timeout(Duration::from_secs(30));
+    params
+}
+
+pub fn client_parameters() -> ClientParameters {
+    let mut params = ClientParameters::default();
+    params.set_initial_max_streams_bidi(1000u32);
+    params.set_initial_max_streams_uni(1000u32);
+    params.set_initial_max_data(1u32 << 20);
+    params.set_initial_max_stream_data_uni(1u32 << 20);
+    params.set_initial_max_stream_data_bidi_local(1u32 << 20);
+    params.set_initial_max_stream_data_bidi_remote(1u32 << 20);
+    params
 }
