@@ -1,7 +1,7 @@
 use super::{Connection, Endpoint};
 use crate::common::{BoxError, ConnectError};
 use futures::future::BoxFuture;
-use gm_quic::{ClientParameters, Connection as QuicConnect, QuicClient};
+use gm_quic::{ClientParameters, Connection as QuicConnect, HeartbeatConfig, QuicClient};
 use gm_quic::{QuicServer, ServerParameters};
 use rustls::RootCertStore;
 use rustls::crypto::ring::default_provider;
@@ -95,6 +95,10 @@ impl GmQuicEndpoint {
         let _ = default_provider().install_default();
         let certifie_key = generate_signed(prik, cert)?;
         let endpoint: Arc<QuicServer> = QuicServer::builder()
+            .defer_idle_timeout(HeartbeatConfig::new_with_interval(
+                Duration::from_millis(5000),
+                Duration::from_millis(1000),
+            ))
             .without_client_cert_verifier()
             .with_single_cert(
                 vec![certifie_key.cert],
@@ -114,6 +118,10 @@ impl GmQuicEndpoint {
         let mut roots = RootCertStore::empty();
         roots.add_parsable_certificates(vec![cert]);
         let client = QuicClient::builder()
+            .defer_idle_timeout(HeartbeatConfig::new_with_interval(
+                Duration::from_millis(5000),
+                Duration::from_millis(1000),
+            ))
             .with_root_certificates(roots)
             .without_cert()
             .with_parameters(client_parameters())
