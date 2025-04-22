@@ -7,8 +7,9 @@ use crate::{
     listener::listener,
     quic::{Connection, Endpoint},
 };
+use chrono::{DateTime, Local};
 use tokio::sync::{Mutex, oneshot};
-use tracing::error;
+use tracing::{error, info};
 pub struct NetServer;
 
 impl NetServer {
@@ -66,6 +67,7 @@ impl NetServer {
                                         .write_frame(&crate::frame::Frame::Connection(
                                             crate::frame::Connection {
                                                 token: connect_request.token.clone(),
+                                                connect_time: Local::now().to_rfc3339(),
                                             },
                                         ))
                                         .await
@@ -78,13 +80,23 @@ impl NetServer {
                     } else {
                         let async_map = async_map.clone();
                         tokio::spawn(async move {
-                            if let Ok(Frame::ConnectionResponse(token)) = buffer.read_frame().await
+                            if let Ok(Frame::ConnectionResponse(connect)) =
+                                buffer.read_frame().await
                             {
                                 //获取sender
                                 let mut w_map = async_map.lock().await;
-                                let option = w_map.remove(&token);
+                                let option = w_map.remove(&connect.token);
                                 drop(w_map);
                                 if let Some(send) = option {
+                                    let index_time =
+                                        DateTime::parse_from_rfc3339(&connect.connect_time)
+                                            .unwrap()
+                                            .with_timezone(&Local);
+                                    info!(
+                                        "connect token : {:?} rtt : {:?}",
+                                        connect.token,
+                                        (Local::now() - index_time).num_microseconds()
+                                    );
                                     let _ = send.send(buffer);
                                 }
                             }

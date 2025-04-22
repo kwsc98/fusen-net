@@ -76,7 +76,7 @@ impl Agent {
                     };
                     let mut buffer = StreamBuffer::new(read_stream, write_stream, DEFAULT_BUF_SIZE);
                     let result = buffer
-                        .write_frame(&Frame::ConnectionResponse(connect.token))
+                        .write_frame(&Frame::ConnectionResponse(connect))
                         .await;
                     if let Err(error) = result {
                         error!("send frame ConnectionResponse error : {:?}", error);

@@ -14,7 +14,7 @@ pub enum Frame {
     Register(Register),
     RegisterResponse(RegisterResponse),
     Connection(Connection),
-    ConnectionResponse(String),
+    ConnectionResponse(Connection),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,6 +33,7 @@ pub struct RegisterResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Connection {
     pub token: String,
+    pub connect_time: String,
 }
 
 impl Frame {
@@ -73,9 +74,9 @@ impl Frame {
                 bytes.put_u8(b'*');
                 bytes.extend_from_slice(&serde_json::to_vec(connection_info)?);
             }
-            Frame::ConnectionResponse(token) => {
+            Frame::ConnectionResponse(connection_info) => {
                 bytes.put_u8(b'#');
-                bytes.extend_from_slice(&serde_json::to_vec(token)?);
+                bytes.extend_from_slice(&serde_json::to_vec(connection_info)?);
             }
             Frame::Ping => {
                 bytes.put_u8(b'!');
