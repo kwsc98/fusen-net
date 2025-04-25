@@ -1,9 +1,10 @@
-use crate::common::{BoxError, ConnectError};
+use crate::common::{self, BoxError, ConnectError};
 
-use super::{Connection, Endpoint};
+use super::{Connection, Endpoint, StreamStop};
 use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use s2n_quic::provider::limits::Limits;
+use s2n_quic::stream::{ReceiveStream, SendStream};
 use s2n_quic::{
     Client, Server,
     client::Connect,
@@ -11,7 +12,6 @@ use s2n_quic::{
 };
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
-use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::info;
 
 fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxError> {
@@ -131,11 +131,25 @@ pub struct S2nConnect {
     acceptor: Arc<Mutex<StreamAcceptor>>,
 }
 
+impl StreamStop for ReceiveStream {
+    fn stop(&mut self) {
+        let _ = self.stop_sending(s2n_quic::application::Error::UNKNOWN);
+    }
+}
+
+impl StreamStop for SendStream {
+    fn stop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+impl common::ReadStream for ReceiveStream {}
+impl common::WriteStream for SendStream {}
+
 impl Connection for S2nConnect {
     fn open_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let mut connect = self.handle.clone();
         Box::pin(async move {
             let (recv_stream, send_stream) = connect.open_bidirectional_stream().await?.split();
@@ -145,8 +159,7 @@ impl Connection for S2nConnect {
 
     fn accept_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let acceptor = self.acceptor.clone();
         Box::pin(async move {
             let mut connect = acceptor.lock().await;

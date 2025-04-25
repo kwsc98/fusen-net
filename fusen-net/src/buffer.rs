@@ -1,23 +1,30 @@
-use crate::frame::{Frame, FrameError};
+use crate::{
+    common::{ReadStream, WriteStream},
+    frame::{Frame, FrameError},
+};
 use bytes::BytesMut;
-use std::{fmt::Debug, pin::Pin};
+use std::fmt::Debug;
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tracing::error;
 
 pub const DEFAULT_BUF_SIZE: usize = 8 * 1024;
 
-pub type BufferRead = Pin<Box<dyn AsyncRead + Send>>;
-
-pub type BufferWrite = Pin<Box<dyn AsyncWrite + Send>>;
-
-pub struct StreamBuffer {
-    recv_stream: BufferRead,
-    send_stream: BufferWrite,
+pub struct StreamBuffer<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
+    recv_stream: RS,
+    send_stream: WS,
     buffer: BytesMut,
     buffer_size: usize,
 }
 
-impl Debug for StreamBuffer {
+impl<RS, WS> Debug for StreamBuffer<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamBuffer")
             .field("recv_stream", &"...")
@@ -28,24 +35,33 @@ impl Debug for StreamBuffer {
     }
 }
 
-unsafe impl Send for StreamBuffer {}
+unsafe impl<RS, WS> Send for StreamBuffer<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
+}
 
-impl StreamBuffer {
-    pub fn new(
-        recv_stream: impl AsyncRead + 'static + Send,
-        send_stream: impl AsyncWrite + 'static + Send,
-        buffer_size: usize,
-    ) -> Self {
+impl<RS, WS> StreamBuffer<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
+    pub fn new(recv_stream: RS, send_stream: WS, buffer_size: usize) -> Self {
         Self {
-            recv_stream: Box::pin(recv_stream),
-            send_stream: Box::pin(send_stream),
+            recv_stream,
+            send_stream,
             buffer: BytesMut::with_capacity(buffer_size),
             buffer_size,
         }
     }
 }
 
-impl StreamBuffer {
+impl<RS, WS> StreamBuffer<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
     async fn write_buf(&mut self, buf: &mut BytesMut) -> Result<(), io::Error> {
         self.send_stream.write_all_buf(buf).await?;
         self.send_stream.flush().await
@@ -83,7 +99,7 @@ impl StreamBuffer {
         self.write_buf(&mut bytes).await
     }
 
-    pub fn split(self) -> (BufferRead, BufferWrite) {
+    pub fn split(self) -> (RS, WS) {
         let StreamBuffer {
             send_stream,
             recv_stream,
@@ -95,10 +111,7 @@ impl StreamBuffer {
 }
 
 pub async fn connect(
-    (mut r1, mut w1): (
-        impl AsyncRead + std::marker::Unpin,
-        impl AsyncWrite + std::marker::Unpin,
-    ),
+    (mut r1, mut w1): (impl ReadStream, impl WriteStream),
     (mut r2, mut w2): (
         impl AsyncRead + std::marker::Unpin,
         impl AsyncWrite + std::marker::Unpin,

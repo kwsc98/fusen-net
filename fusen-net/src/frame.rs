@@ -20,6 +20,7 @@ pub enum Frame {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Register {
     pub target: String,
+    pub remote_port: u16,
     pub tag: String,
     pub token: String,
     pub info: String,

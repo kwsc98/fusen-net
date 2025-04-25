@@ -1,5 +1,9 @@
 use std::{error::Error, io};
 
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::quic::StreamStop;
+
 pub mod token;
 
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;
@@ -41,4 +45,10 @@ impl From<s2n_quic::connection::Error> for ConnectError {
     fn from(value: s2n_quic::connection::Error) -> Self {
         ConnectError::S2nConnectError(value)
     }
+}
+
+pub trait ReadStream: AsyncRead + Send + Sync + StreamStop + std::marker::Unpin + 'static {}
+pub trait WriteStream:
+    AsyncWrite + Send + Sync + StreamStop + std::marker::Unpin + 'static
+{
 }

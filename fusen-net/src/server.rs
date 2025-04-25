@@ -19,7 +19,7 @@ impl NetServer {
                 let mut init = None;
                 let async_map = Arc::new(Mutex::new(HashMap::<
                     String,
-                    oneshot::Sender<StreamBuffer>,
+                    oneshot::Sender<StreamBuffer<_, _>>,
                 >::default()));
                 while let Ok((read_stream, write_stream)) = connect.accept_bi().await {
                     let mut buffer = StreamBuffer::new(read_stream, write_stream, DEFAULT_BUF_SIZE);

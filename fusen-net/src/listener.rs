@@ -2,7 +2,7 @@ use std::{io, net::SocketAddr, time::Duration};
 
 use crate::{
     buffer::{self, StreamBuffer},
-    common::token::get_uuid,
+    common::{ReadStream, WriteStream, token::get_uuid},
     frame::Register,
 };
 use tokio::sync::{
@@ -11,23 +11,28 @@ use tokio::sync::{
 };
 use tracing::{debug, error};
 
-pub struct ConnectRequest {
+pub struct ConnectRequest<RS, WS>
+where
+    RS: ReadStream,
+    WS: WriteStream,
+{
     pub token: String,
-    pub one_sender: oneshot::Sender<StreamBuffer>,
+    pub one_sender: oneshot::Sender<StreamBuffer<RS, WS>>,
 }
 
-pub async fn listener(
-    _registry: Register,
-) -> Result<(SocketAddr, UnboundedReceiver<ConnectRequest>), io::Error> {
-    let (send, recv) = mpsc::unbounded_channel::<ConnectRequest>();
+pub async fn listener<RS: ReadStream, WS: WriteStream>(
+    registry: Register,
+) -> Result<(SocketAddr, UnboundedReceiver<ConnectRequest<RS, WS>>), io::Error> {
+    let (send, recv) = mpsc::unbounded_channel::<ConnectRequest<RS, WS>>();
     //监听tcp连接
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", 0)).await?;
+    let listener =
+        tokio::net::TcpListener::bind(format!("0.0.0.0:{}", registry.remote_port)).await?;
     let local_addr = listener.local_addr()?;
     tokio::spawn(async move {
         while let Ok((tcp_stream, _)) = listener.accept().await {
             let send = send.clone();
             tokio::spawn(async move {
-                let (one_send, one_recv) = oneshot::channel::<StreamBuffer>();
+                let (one_send, one_recv) = oneshot::channel::<StreamBuffer<RS, WS>>();
                 if let Err(error) = send.send(ConnectRequest {
                     token: get_uuid(),
                     one_sender: one_send,

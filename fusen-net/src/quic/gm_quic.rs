@@ -1,7 +1,10 @@
-use super::{Connection, Endpoint};
-use crate::common::{BoxError, ConnectError};
+use super::{Connection, Endpoint, StreamStop};
+use crate::common::{self, BoxError, ConnectError};
 use futures::future::BoxFuture;
-use gm_quic::{ClientParameters, Connection as QuicConnect, HeartbeatConfig, QuicClient};
+use gm_quic::{
+    ClientParameters, Connection as QuicConnect, HeartbeatConfig, QuicClient, StreamReader,
+    StreamWriter,
+};
 use gm_quic::{QuicServer, ServerParameters};
 use rustls::RootCertStore;
 use rustls::crypto::ring::default_provider;
@@ -11,7 +14,6 @@ use rustls::pki_types::{
 };
 use std::io;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 pub struct CertifiedKeyV2<'a> {
     priv_key: PrivatePkcs8KeyDer<'a>,
@@ -29,11 +31,25 @@ pub struct GmQuicConnect {
     remote_address: SocketAddr,
 }
 
+impl StreamStop for StreamReader {
+    fn stop(&mut self) {
+        self.stop(0);
+    }
+}
+
+impl StreamStop for StreamWriter {
+    fn stop(&mut self) {
+        self.cancel(0);
+    }
+}
+
+impl common::ReadStream for StreamReader {}
+impl common::WriteStream for StreamWriter {}
+
 impl Connection for GmQuicConnect {
     fn open_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
             let stream = match connect.open_bi_stream().await {
@@ -51,8 +67,7 @@ impl Connection for GmQuicConnect {
 
     fn accept_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
             let stream = match connect.accept_bi_stream().await {

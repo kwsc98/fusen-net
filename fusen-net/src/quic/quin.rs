@@ -1,10 +1,9 @@
-use super::{Connection, Endpoint};
-use crate::common::{BoxError, ConnectError};
+use super::{Connection, Endpoint, StreamStop};
+use crate::common::{self, BoxError, ConnectError};
 use futures::future::BoxFuture;
-use quinn::{ClientConfig, Endpoint as QuicEndpoint, ServerConfig};
+use quinn::{ClientConfig, Endpoint as QuicEndpoint, RecvStream, SendStream, ServerConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem, pem::PemObject};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 #[allow(unused)]
 fn make_client_endpoint(
@@ -56,11 +55,25 @@ pub struct QuinnConnect {
     connect: quinn::Connection,
 }
 
+impl StreamStop for RecvStream {
+    fn stop(&mut self) {
+        let _ = self.stop(VarInt::from_u32(0));
+    }
+}
+
+impl StreamStop for SendStream {
+    fn stop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+impl common::ReadStream for RecvStream {}
+impl common::WriteStream for SendStream {}
+
 impl Connection for QuinnConnect {
     fn open_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
             let (send_stream, recv_stream) = connect.open_bi().await?;
@@ -70,8 +83,7 @@ impl Connection for QuinnConnect {
 
     fn accept_bi(
         &self,
-    ) -> BoxFuture<Result<(impl AsyncRead + 'static, impl AsyncWrite + 'static), ConnectError>>
-    {
+    ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
             let (send_stream, recv_stream) = connect.accept_bi().await?;
