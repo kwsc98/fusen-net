@@ -121,5 +121,9 @@ pub async fn connect(
         res = io::copy(&mut r1, &mut w2) => res,
         res = io::copy(&mut r2, &mut w1) => res,
     };
+    // r1.stop();
+    // w1.stop();
+    let _ = w2.shutdown().await;
+    let _ = w1.shutdown().await;
     Ok(())
 }

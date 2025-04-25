@@ -57,7 +57,7 @@ pub struct QuinnConnect {
 
 impl StreamStop for RecvStream {
     fn stop(&mut self) {
-        let _ = self.stop(VarInt::from_u32(0));
+        let _ = self.stop(VarInt::from_u32(0x100));
     }
 }
 

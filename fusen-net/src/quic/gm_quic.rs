@@ -14,6 +14,7 @@ use rustls::pki_types::{
 };
 use std::io;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::io::AsyncWriteExt;
 
 pub struct CertifiedKeyV2<'a> {
     priv_key: PrivatePkcs8KeyDer<'a>,
@@ -33,13 +34,13 @@ pub struct GmQuicConnect {
 
 impl StreamStop for StreamReader {
     fn stop(&mut self) {
-        self.stop(0);
+        self.stop(0x100);
     }
 }
 
 impl StreamStop for StreamWriter {
     fn stop(&mut self) {
-        self.cancel(0);
+        self.cancel(0x100);
     }
 }
 
