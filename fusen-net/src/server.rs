@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     buffer::{DEFAULT_BUF_SIZE, StreamBuffer},
-    common::ConnectError,
+    common::{ConnectError, shutdown::Shutdown},
     frame::{Frame, RegisterResponse},
     listener::listener,
     quic::{Connection, Endpoint},
@@ -21,6 +21,7 @@ impl NetServer {
                     String,
                     oneshot::Sender<StreamBuffer<_, _>>,
                 >::default()));
+                let (sender, _) = tokio::sync::broadcast::channel::<()>(1);
                 while let Ok((read_stream, write_stream)) = connect.accept_bi().await {
                     let mut buffer = StreamBuffer::new(read_stream, write_stream, DEFAULT_BUF_SIZE);
                     if init.is_none() {
@@ -28,7 +29,8 @@ impl NetServer {
                         if let Ok(crate::frame::Frame::Register(registry)) =
                             buffer.read_frame().await
                         {
-                            let (socker_addr, mut recv) = match listener(registry).await {
+                            let shutdow = Shutdown::new(sender.subscribe());
+                            let (socker_addr, mut recv) = match listener(registry, shutdow).await {
                                 Ok(recv) => recv,
                                 Err(error) => {
                                     error!("register listener error : {:?}", error);
@@ -103,6 +105,7 @@ impl NetServer {
                         });
                     }
                 }
+                drop(sender);
             });
         }
         Ok(())

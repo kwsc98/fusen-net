@@ -14,7 +14,6 @@ use rustls::pki_types::{
 };
 use std::io;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::io::AsyncWriteExt;
 
 pub struct CertifiedKeyV2<'a> {
     priv_key: PrivatePkcs8KeyDer<'a>,
@@ -112,7 +111,7 @@ impl GmQuicEndpoint {
         let certifie_key = generate_signed(prik, cert)?;
         let endpoint: Arc<QuicServer> = QuicServer::builder()
             .defer_idle_timeout(HeartbeatConfig::new_with_interval(
-                Duration::from_millis(5000),
+                Duration::from_millis(60000),
                 Duration::from_millis(1000),
             ))
             .without_client_cert_verifier()
@@ -135,7 +134,7 @@ impl GmQuicEndpoint {
         roots.add_parsable_certificates(vec![cert]);
         let client = QuicClient::builder()
             .defer_idle_timeout(HeartbeatConfig::new_with_interval(
-                Duration::from_millis(5000),
+                Duration::from_millis(60000),
                 Duration::from_millis(1000),
             ))
             .with_root_certificates(roots)

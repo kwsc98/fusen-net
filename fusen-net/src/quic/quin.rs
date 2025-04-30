@@ -33,7 +33,7 @@ fn make_server_endpoint(
     let mut server_config = ServerConfig::with_single_cert(vec![cert.clone()], priv_key.into())?;
     let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
     transport_config.keep_alive_interval(Some(Duration::from_millis(1000)));
-    transport_config.max_idle_timeout(Some(Duration::from_millis(5000).try_into()?));
+    transport_config.max_idle_timeout(Some(Duration::from_millis(60000).try_into()?));
     transport_config.max_concurrent_bidi_streams(1000u32.into());
     let endpoint = QuicEndpoint::server(server_config, bind_addr)?;
     Ok(endpoint)

@@ -8,6 +8,7 @@ use crate::{
 use tokio::{io, net::TcpStream};
 use tracing::{debug, error, info};
 
+#[derive(Clone)]
 pub struct Agent {
     pub register: String,
     pub server_name: String,

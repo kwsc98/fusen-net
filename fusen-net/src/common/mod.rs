@@ -4,6 +4,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::quic::StreamStop;
 
+pub mod shutdown;
 pub mod token;
 
 pub type BoxError = Box<dyn Error + Send + Sync + 'static>;

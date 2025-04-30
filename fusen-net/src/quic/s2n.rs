@@ -18,7 +18,7 @@ fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, BoxError>
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
-        .with_max_idle_timeout(Duration::from_secs(5))?
+        .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
     let server = Server::builder()
         .with_tls((cert, priv_key))?
@@ -32,7 +32,7 @@ fn get_client(cert: &str) -> Result<Client, BoxError> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
-        .with_max_idle_timeout(Duration::from_secs(5))?
+        .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
     let client = Client::builder()
         .with_tls(cert)?
