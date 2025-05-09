@@ -63,8 +63,7 @@ where
     WS: WriteStream,
 {
     async fn write_buf(&mut self, buf: &mut BytesMut) -> Result<(), io::Error> {
-        self.send_stream.write_all_buf(buf).await?;
-        self.send_stream.flush().await
+        self.send_stream.write_all_buf(buf).await
     }
 
     pub async fn read_frame(&mut self) -> Result<Frame, io::Error> {
