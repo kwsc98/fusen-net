@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod common;
+pub mod error;
 pub mod quic;
 
 pub mod agent;

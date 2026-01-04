@@ -1,7 +1,6 @@
 use examples::{CERT_PEM, KEY_PEM, init_log};
 use fusen_net::{
     quic::{gm_quic::GmQuicEndpoint, quin::QuinnEndpoint, s2n::S2nEndpoint},
-    server::NetServer,
 };
 
 #[tokio::main]
