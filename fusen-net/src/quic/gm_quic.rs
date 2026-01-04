@@ -1,11 +1,10 @@
 use super::{Connection, Endpoint, StreamStop};
 use crate::common::{self, BoxError, ConnectError};
 use futures::future::BoxFuture;
-use gm_quic::{
-    ClientParameters, Connection as QuicConnect, HeartbeatConfig, QuicClient, StreamReader,
-    StreamWriter,
+use gm_quic::prelude::{
+    BindUri, CancelStream, Connection as GmConnect, EndpointAddr, ParameterId, QuicClient,
+    QuicListeners, SocketEndpointAddr, StopSending, StreamReader, StreamWriter, handy,
 };
-use gm_quic::{QuicServer, ServerParameters};
 use rustls::RootCertStore;
 use rustls::crypto::ring::default_provider;
 use rustls::pki_types::{
@@ -13,7 +12,9 @@ use rustls::pki_types::{
     pem::{self, PemObject},
 };
 use std::io;
+use std::str::FromStr;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::io::AsyncWriteExt;
 
 pub struct CertifiedKeyV2<'a> {
     priv_key: PrivatePkcs8KeyDer<'a>,
@@ -27,19 +28,19 @@ pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<
 }
 
 pub struct GmQuicConnect {
-    connect: Arc<QuicConnect>,
-    remote_address: SocketAddr,
+    connect: Arc<GmConnect>,
+    remote_address: EndpointAddr,
 }
 
 impl StreamStop for StreamReader {
-    fn stop(&mut self) {
+    fn steam_stop(&mut self) {
         self.stop(0x100);
     }
 }
 
 impl StreamStop for StreamWriter {
-    fn stop(&mut self) {
-        self.cancel(0x100);
+    fn steam_stop(&mut self) {
+        let _ = self.cancel(0x100);
     }
 }
 
@@ -54,7 +55,11 @@ impl Connection for GmQuicConnect {
         Box::pin(async move {
             let stream = match connect.open_bi_stream().await {
                 Ok(stream) => stream,
-                Err(error) => return Err(ConnectError::GmQuicConnectError(error)),
+                Err(error) => {
+                    return Err(ConnectError::GmQuicConnectError(io::Error::other(
+                        error.to_string(),
+                    )));
+                }
             };
             let Some((_stream_id, (recv_stream, send_stream))) = stream else {
                 return Err(ConnectError::GmQuicConnectError(io::Error::other(
@@ -70,34 +75,35 @@ impl Connection for GmQuicConnect {
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), ConnectError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
-            let stream = match connect.accept_bi_stream().await {
+            let (_stream_id, (recv_stream, send_stream)) = match connect.accept_bi_stream().await {
                 Ok(stream) => stream,
-                Err(error) => return Err(ConnectError::GmQuicConnectError(error)),
+                Err(error) => {
+                    return Err(ConnectError::GmQuicConnectError(io::Error::other(
+                        error.to_string(),
+                    )));
+                }
             };
-            let Some((_stream_id, (recv_stream, send_stream))) = stream else {
-                return Err(ConnectError::GmQuicConnectError(io::Error::other(
-                    "open_bi error !",
-                )));
-            };
+
             Ok((recv_stream, send_stream))
         })
     }
 
     fn remote_address(&self) -> SocketAddr {
-        self.remote_address
+        self.remote_address;
+        todo!()
     }
 
     fn closed(&self) -> BoxFuture<ConnectError> {
         let connect = self.connect.clone();
         Box::pin(async move {
-            connect.close("done".into(), 0);
+            let _ = connect.close("done", 0);
             ConnectError::ConnectClose
         })
     }
 }
 
 pub struct GmQuicEndpoint {
-    pub server: Option<Arc<QuicServer>>,
+    pub server: Option<Arc<QuicListeners>>,
     pub client: Option<Arc<QuicClient>>,
 }
 
@@ -109,18 +115,25 @@ impl GmQuicEndpoint {
     ) -> Result<impl Endpoint, BoxError> {
         let _ = default_provider().install_default();
         let certifie_key = generate_signed(prik, cert)?;
-        let endpoint: Arc<QuicServer> = QuicServer::builder()
-            .defer_idle_timeout(HeartbeatConfig::new_with_interval(
-                Duration::from_millis(60000),
-                Duration::from_millis(1000),
-            ))
+        let mut parameters = handy::server_parameters();
+        // let _ = parameters.set(ParameterId::InitialMaxStreamsBidi, 1000u32);
+        // let _ = parameters.set(ParameterId::InitialMaxStreamsUni, 1000u32);
+        let endpoint = QuicListeners::builder()?
             .without_client_cert_verifier()
-            .with_single_cert(
-                vec![certifie_key.cert],
-                PrivateKeyDer::Pkcs8(certifie_key.priv_key),
-            )
-            .with_parameters(server_parameters())
-            .listen(format!("0.0.0.0:{}", bind_port).parse::<SocketAddr>()?)?;
+            .with_parameters(parameters)
+            .defer_idle_timeout(Duration::from_secs(60))
+            .enable_0rtt()
+            .listen(4096);
+        let bind_uris = vec![BindUri::from_str(
+            format!("0.0.0.0:{}", bind_port).as_str(),
+        )?];
+        endpoint.add_server(
+            "localhost",
+            certifie_key.cert,
+            PrivateKeyDer::Pkcs8(certifie_key.priv_key),
+            bind_uris,
+            None,
+        )?;
         Ok(GmQuicEndpoint {
             server: Some(endpoint),
             client: None,
@@ -132,15 +145,16 @@ impl GmQuicEndpoint {
         let cert = CertificateDer::from_pem_reader(cert.as_bytes())?;
         let mut roots = RootCertStore::empty();
         roots.add_parsable_certificates(vec![cert]);
+        let mut parameters = handy::client_parameters();
+        // let _ = parameters.set(ParameterId::InitialMaxStreamsBidi, 1000u32);
+        // let _ = parameters.set(ParameterId::InitialMaxStreamsUni, 1000u32);
         let client = QuicClient::builder()
-            .defer_idle_timeout(HeartbeatConfig::new_with_interval(
-                Duration::from_millis(60000),
-                Duration::from_millis(1000),
-            ))
+            .defer_idle_timeout(Duration::from_secs(20))
             .with_root_certificates(roots)
             .without_cert()
-            .with_parameters(client_parameters())
-            .reuse_connection()
+            .with_parameters(parameters)
+            .enable_sslkeylog()
+            .enable_0rtt()
             .build();
         Ok(GmQuicEndpoint {
             server: None,
@@ -156,13 +170,12 @@ impl Endpoint for GmQuicEndpoint {
             let Some(server) = server else {
                 return Err(ConnectError::EndpointClose);
             };
-            let (connect, addr) = server
-                .accept()
-                .await
-                .map_err(ConnectError::GmQuicConnectError)?;
+            let (connect, _, addr, _) = server.accept().await.map_err(|error| {
+                ConnectError::GmQuicConnectError(io::Error::other(error.to_string()))
+            })?;
             Ok(GmQuicConnect {
-                connect,
-                remote_address: addr.remote().addr(),
+                connect: Arc::new(connect),
+                remote_address: addr.remote(),
             })
         })
     }
@@ -177,36 +190,16 @@ impl Endpoint for GmQuicEndpoint {
             let Some(client) = client else {
                 return Err(ConnectError::EndpointClose);
             };
+            let addr = EndpointAddr::Socket(SocketEndpointAddr::Direct { addr });
             let connect = client
-                .connect(&server_name, addr)
-                .map_err(ConnectError::GmQuicConnectError)?;
+                .connected_to(&server_name, vec![addr.clone()])
+                .map_err(|error| {
+                    ConnectError::GmQuicConnectError(io::Error::other(error.to_string()))
+                })?;
             Ok(GmQuicConnect {
-                connect,
+                connect: Arc::new(connect),
                 remote_address: addr,
             })
         })
     }
-}
-
-pub fn server_parameters() -> ServerParameters {
-    let mut params = ServerParameters::default();
-    params.set_initial_max_streams_bidi(1000u32);
-    params.set_initial_max_streams_uni(1000u32);
-    params.set_initial_max_data(1u32 << 20);
-    params.set_initial_max_stream_data_uni(1u32 << 20);
-    params.set_initial_max_stream_data_bidi_local(1u32 << 20);
-    params.set_initial_max_stream_data_bidi_remote(1u32 << 20);
-    params.set_max_idle_timeout(Duration::from_secs(30));
-    params
-}
-
-pub fn client_parameters() -> ClientParameters {
-    let mut params = ClientParameters::default();
-    params.set_initial_max_streams_bidi(1000u32);
-    params.set_initial_max_streams_uni(1000u32);
-    params.set_initial_max_data(1u32 << 20);
-    params.set_initial_max_stream_data_uni(1u32 << 20);
-    params.set_initial_max_stream_data_bidi_local(1u32 << 20);
-    params.set_initial_max_stream_data_bidi_remote(1u32 << 20);
-    params
 }

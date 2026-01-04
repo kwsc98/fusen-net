@@ -56,13 +56,13 @@ pub struct QuinnConnect {
 }
 
 impl StreamStop for RecvStream {
-    fn stop(&mut self) {
+    fn steam_stop(&mut self) {
         let _ = self.stop(VarInt::from_u32(0x100));
     }
 }
 
 impl StreamStop for SendStream {
-    fn stop(&mut self) {
+    fn steam_stop(&mut self) {
         let _ = self.finish();
     }
 }

@@ -10,10 +10,9 @@ use tracing::info;
 async fn main() {
     init_log();
     info!("start");
-
     tokio::spawn(async move {
         let agent = client::Agent {
-            register: "47.93.39.219:8088".to_owned(),
+            register: "127.0.0.1:8088".to_owned(),
             server_name: "localhost".to_string(),
         };
         let result = agent
@@ -32,7 +31,7 @@ async fn main() {
     });
     tokio::spawn(async move {
         let agent = client::Agent {
-            register: "47.93.39.219:8087".to_owned(),
+            register: "127.0.0.1:8087".to_owned(),
             server_name: "localhost".to_string(),
         };
         let result = agent
@@ -50,7 +49,7 @@ async fn main() {
         info!("s2n_quic {:?}", result);
     });
     let agent = client::Agent {
-        register: "47.93.39.219:8089".to_owned(),
+        register: "127.0.0.1:8089".to_owned(),
         server_name: "localhost".to_string(),
     };
     let result = agent

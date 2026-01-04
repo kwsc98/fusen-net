@@ -14,9 +14,15 @@ path = "src/client.rs"
 name = "server"
 path = "src/server.rs"
 
+[[bin]]
+name = "tun-test"
+path = "src/tun_test.rs"
+
 [dependencies]
 tokio = { version = "1.44.2", features = ["rt-multi-thread"] }
 tracing-subscriber = "0.3.19"
 tracing = "0.1.41"
 
 fusen-net = { path = "../fusen-net" }
+tun = { version = "0.8.5", features = ["async"] }
+packet = "0.1.4"

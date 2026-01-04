@@ -63,7 +63,9 @@ where
     WS: WriteStream,
 {
     async fn write_buf(&mut self, buf: &mut BytesMut) -> Result<(), io::Error> {
-        self.send_stream.write_all_buf(buf).await
+        let _ = self.send_stream.write_all_buf(buf).await;
+        // let _ = self.send_stream.flush().await;
+        Ok(())
     }
 
     pub async fn read_frame(&mut self) -> Result<Frame, io::Error> {
@@ -120,9 +122,9 @@ pub async fn connect(
         res = io::copy(&mut r1, &mut w2) => res,
         res = io::copy(&mut r2, &mut w1) => res,
     };
-    // r1.stop();
-    // w1.stop();
-    let _ = w2.shutdown().await;
+    r1.steam_stop();
+    w1.steam_stop();
     let _ = w1.shutdown().await;
+    let _ = w2.shutdown().await;
     Ok(())
 }

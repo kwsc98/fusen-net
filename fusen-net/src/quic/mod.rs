@@ -7,7 +7,7 @@ pub mod quin;
 pub mod s2n;
 
 pub trait StreamStop {
-    fn stop(&mut self);
+    fn steam_stop(&mut self);
 }
 
 pub trait Endpoint: 'static {

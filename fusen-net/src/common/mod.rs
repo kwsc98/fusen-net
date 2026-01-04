@@ -1,5 +1,6 @@
 use std::{error::Error, io};
 
+use gm_quic::prelude::ListenersShutdown;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::quic::StreamStop;
@@ -51,5 +52,4 @@ impl From<s2n_quic::connection::Error> for ConnectError {
 pub trait ReadStream: AsyncRead + Send + Sync + StreamStop + std::marker::Unpin + 'static {}
 pub trait WriteStream:
     AsyncWrite + Send + Sync + StreamStop + std::marker::Unpin + 'static
-{
-}
+{}

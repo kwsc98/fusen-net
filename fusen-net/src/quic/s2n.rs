@@ -132,13 +132,13 @@ pub struct S2nConnect {
 }
 
 impl StreamStop for ReceiveStream {
-    fn stop(&mut self) {
+    fn steam_stop(&mut self) {
         let _ = self.stop_sending(s2n_quic::application::Error::new(0x100).unwrap());
     }
 }
 
 impl StreamStop for SendStream {
-    fn stop(&mut self) {
+    fn steam_stop(&mut self) {
         let _ = self.finish();
     }
 }
