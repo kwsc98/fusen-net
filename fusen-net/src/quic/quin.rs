@@ -1,6 +1,8 @@
 use super::{Connection, Endpoint, StreamStop};
 use crate::{common, error::FusenNetError};
+use bytes::Bytes;
 use futures::future::BoxFuture;
+use gm_quic::qrecovery::streams::error;
 use quinn::{ClientConfig, Endpoint as QuicEndpoint, RecvStream, SendStream, ServerConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem, pem::PemObject};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -11,7 +13,8 @@ fn make_client_endpoint(
     server_certs: &[&str],
 ) -> Result<QuicEndpoint, FusenNetError> {
     let client_cfg = configure_client(server_certs)?;
-    let mut endpoint = QuicEndpoint::client(bind_addr).map_err(|error| FusenNetError::BoxError(Box::new(error)))?;
+    let mut endpoint = QuicEndpoint::client(bind_addr)
+        .map_err(|error| FusenNetError::BoxError(Box::new(error)))?;
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
@@ -94,12 +97,27 @@ impl Connection for QuinnConnect {
     }
 
     fn accept_bi(
-        &self,
+        &mut self,
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), FusenNetError>> {
         let connect = self.connect.clone();
         Box::pin(async move {
             let (send_stream, recv_stream) = connect.accept_bi().await?;
             Ok((recv_stream, send_stream))
+        })
+    }
+
+    fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
+        self.connect
+            .send_datagram(bytes)
+            .map_err(|error| FusenNetError::BoxError(Box::new(error)))
+    }
+
+    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+        Box::pin(async move {
+            self.connect
+                .read_datagram()
+                .await
+                .map_err(|error| FusenNetError::QuinnConnectionError(error))
         })
     }
 

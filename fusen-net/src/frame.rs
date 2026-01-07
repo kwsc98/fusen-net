@@ -9,26 +9,19 @@ pub enum FrameError {
 
 #[derive(Debug)]
 pub enum Frame {
-    Ping,
     Ack,
     Register(Register),
     RegisterResponse(RegisterResponse),
-    Connection(Connection),
-    ConnectionResponse(Connection),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Register {
-    pub target: String,
-    pub remote_port: u16,
-    pub tag: String,
-    pub token: String,
-    pub info: String,
+    pub authentication: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegisterResponse {
-    pub local_addr: String,
+    pub local_addr: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,12 +49,9 @@ impl Frame {
         }
         let pointer = 5 + lenght;
         let frame = match buf[5] {
-            b'*' => Frame::Connection(serde_json::from_slice(&buf[6..pointer])?),
-            b'#' => Frame::ConnectionResponse(serde_json::from_slice(&buf[6..pointer])?),
-            b'+' => Frame::Register(serde_json::from_slice(&buf[6..pointer])?),
-            b'-' => Frame::RegisterResponse(serde_json::from_slice(&buf[6..pointer])?),
-            b'!' => Frame::Ping,
-            b'@' => Frame::Ack,
+            0 => Frame::Ack,
+            1 => Frame::Register(serde_json::from_slice(&buf[6..pointer])?),
+            2 => Frame::RegisterResponse(serde_json::from_slice(&buf[6..pointer])?),
             _ => return Err(FrameError::Other("parse error".into())),
         };
         bytes.advance(pointer);
@@ -71,34 +61,22 @@ impl Frame {
     pub fn serialization(&self) -> Result<BytesMut, FrameError> {
         let mut bytes = BytesMut::with_capacity(128);
         match self {
-            Frame::Connection(connection_info) => {
-                bytes.put_u8(b'*');
-                bytes.extend_from_slice(&serde_json::to_vec(connection_info)?);
-            }
-            Frame::ConnectionResponse(connection_info) => {
-                bytes.put_u8(b'#');
-                bytes.extend_from_slice(&serde_json::to_vec(connection_info)?);
-            }
-            Frame::Ping => {
-                bytes.put_u8(b'!');
-                bytes.extend_from_slice(b"ping");
-            }
             Frame::Ack => {
-                bytes.put_u8(b'@');
+                bytes.put_u8(0);
                 bytes.extend_from_slice(b"ack");
             }
             Frame::Register(register_info) => {
-                bytes.put_u8(b'+');
+                bytes.put_u8(1);
                 bytes.extend_from_slice(&serde_json::to_vec(register_info)?);
             }
             Frame::RegisterResponse(register_response) => {
-                bytes.put_u8(b'-');
+                bytes.put_u8(2);
                 bytes.extend_from_slice(&serde_json::to_vec(register_response)?);
             }
         }
         let len = bytes.len();
         let mut head: BytesMut = BytesMut::with_capacity(5 + len);
-        head.put_u8(b'0');
+        head.put_u8(0);
         let le_bytes = len.to_be_bytes();
         for item in le_bytes.iter().skip(4) {
             head.put_u8(*item);

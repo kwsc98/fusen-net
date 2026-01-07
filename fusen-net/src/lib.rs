@@ -4,7 +4,6 @@ pub mod error;
 pub mod quic;
 
 pub mod agent;
-pub mod client;
 pub mod frame;
-pub mod listener;
 pub mod server;
+pub mod gateway;

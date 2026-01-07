@@ -1,6 +1,7 @@
 use super::{Connection, Endpoint, StreamStop};
 use crate::common::{self};
 use crate::error::FusenNetError;
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use gm_quic::prelude::{
     BindUri, BuildListenersError, CancelStream, Connection as GmConnect, EndpointAddr,
@@ -29,7 +30,7 @@ pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<
 }
 
 pub struct GmQuicConnect {
-    connect: Arc<GmConnect>,
+    connect: GmConnect,
     remote_address: EndpointAddr,
 }
 
@@ -52,9 +53,8 @@ impl Connection for GmQuicConnect {
     fn open_bi(
         &self,
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), FusenNetError>> {
-        let connect = self.connect.clone();
         Box::pin(async move {
-            let stream = match connect.open_bi_stream().await {
+            let stream = match self.connect.open_bi_stream().await {
                 Ok(stream) => stream,
                 Err(error) => {
                     return Err(FusenNetError::GmQuicConnectError(io::Error::other(
@@ -72,21 +72,29 @@ impl Connection for GmQuicConnect {
     }
 
     fn accept_bi(
-        &self,
+        &mut self,
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), FusenNetError>> {
-        let connect = self.connect.clone();
         Box::pin(async move {
-            let (_stream_id, (recv_stream, send_stream)) = match connect.accept_bi_stream().await {
-                Ok(stream) => stream,
-                Err(error) => {
-                    return Err(FusenNetError::GmQuicConnectError(io::Error::other(
-                        error.to_string(),
-                    )));
-                }
-            };
+            let (_stream_id, (recv_stream, send_stream)) =
+                match self.connect.accept_bi_stream().await {
+                    Ok(stream) => stream,
+                    Err(error) => {
+                        return Err(FusenNetError::GmQuicConnectError(io::Error::other(
+                            error.to_string(),
+                        )));
+                    }
+                };
 
             Ok((recv_stream, send_stream))
         })
+    }
+
+    fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
+        todo!()
+    }
+
+    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+        todo!()
     }
 
     fn remote_address(&self) -> SocketAddr {
@@ -95,9 +103,8 @@ impl Connection for GmQuicConnect {
     }
 
     fn closed(&self) -> BoxFuture<FusenNetError> {
-        let connect = self.connect.clone();
         Box::pin(async move {
-            let _ = connect.close("done", 0);
+            let _ = self.connect.close("done", 0);
             FusenNetError::ConnectClose
         })
     }
@@ -199,7 +206,7 @@ impl Endpoint for GmQuicEndpoint {
                 FusenNetError::GmQuicConnectError(io::Error::other(error.to_string()))
             })?;
             Ok(GmQuicConnect {
-                connect: Arc::new(connect),
+                connect,
                 remote_address: addr.remote(),
             })
         })
@@ -222,7 +229,7 @@ impl Endpoint for GmQuicEndpoint {
                     FusenNetError::GmQuicConnectError(io::Error::other(error.to_string()))
                 })?;
             Ok(GmQuicConnect {
-                connect: Arc::new(connect),
+                connect,
                 remote_address: addr,
             })
         })

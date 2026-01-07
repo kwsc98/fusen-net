@@ -3,7 +3,7 @@ use std::{error::Error, io};
 #[derive(Debug, thiserror::Error)]
 pub enum FusenNetError {
     #[error("box_error : {0}")]
-    BoxError(Box<dyn Error>),
+    BoxError(Box<dyn Error + 'static + Sync + Send>),
 
     #[error("quinn_connection_error : {0}")]
     QuinnConnectionError(quinn::ConnectionError),

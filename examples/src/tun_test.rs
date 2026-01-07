@@ -54,5 +54,6 @@ async fn main_entry() -> Result<(), BoxError> {
         let size = dev.read(&mut data).await?;
         let _ = dev.write(&data[..size]).await;
     }
+    
     Ok(())
 }

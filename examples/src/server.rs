@@ -1,25 +1,35 @@
 use examples::{CERT_PEM, KEY_PEM, init_log};
-use fusen_net::{
-    quic::{gm_quic::GmQuicEndpoint, quin::QuinnEndpoint, s2n::S2nEndpoint},
-};
+use fusen_net::server::{Server, ServerConfig};
 
 #[tokio::main]
 async fn main() {
     init_log();
     tokio::spawn(async move {
-        let result = NetServer
-            .run(S2nEndpoint::make_server_endpoint(8087, CERT_PEM, KEY_PEM).unwrap())
-            .await;
+        let result = Server::run(ServerConfig {
+            port: 8087,
+            quic_lib: fusen_net::quic::Quiclib::S2n,
+            cert_pem: CERT_PEM.to_string(),
+            priv_key_pem: KEY_PEM.to_string(),
+        })
+        .await;
         println!("{:?}", result);
     });
     tokio::spawn(async move {
-        let result = NetServer
-            .run(GmQuicEndpoint::make_server_endpoint(8088, CERT_PEM, KEY_PEM).unwrap())
-            .await;
+        let result = Server::run(ServerConfig {
+            port: 8088,
+            quic_lib: fusen_net::quic::Quiclib::GmQuic,
+            cert_pem: CERT_PEM.to_string(),
+            priv_key_pem: KEY_PEM.to_string(),
+        })
+        .await;
         println!("{:?}", result);
     });
-    let result = NetServer
-        .run(QuinnEndpoint::make_server_endpoint(8089, CERT_PEM, KEY_PEM).unwrap())
-        .await;
+    let result = Server::run(ServerConfig {
+        port: 8089,
+        quic_lib: fusen_net::quic::Quiclib::Quin,
+        cert_pem: CERT_PEM.to_string(),
+        priv_key_pem: KEY_PEM.to_string(),
+    })
+    .await;
     println!("{:?}", result);
 }

@@ -13,8 +13,8 @@ tokio = { version = "1.48.0", features = ["sync", "io-util"] }
 bytes = "1.11.0"
 hyper-util = "0.1.19"
 futures = "0.3.31"
-s2n-quic = "1.71.0"
-gm-quic = "0.4.0"
+s2n-quic = { version = "1.71.0", features = ["unstable-provider-datagram"] }
+gm-quic = {version =  "0.4.0" ,features = ["unreliable"]}
 quinn = { version = "0.11.9", features = ["runtime-tokio"] }
 rustls = "0.23.26"
 rcgen = "0.13.2"
@@ -32,3 +32,4 @@ serde_json = "1.0.140"
 pnet = "0.35.0"
 uuid = { version = "1.16.0", features = ["v4"] }
 thiserror = "2.0.12"
+packet = "0.1.4"

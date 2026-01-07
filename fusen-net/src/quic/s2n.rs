@@ -1,23 +1,23 @@
+use super::{Connection, Endpoint, StreamStop};
 use crate::common::{self};
 use crate::error::FusenNetError;
-use crate::quic::s2n;
-
-use super::{Connection, Endpoint, StreamStop};
+use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::lock::Mutex;
+use s2n_quic::application::Error;
+use s2n_quic::provider::datagram::default::{Receiver, Sender};
 use s2n_quic::provider::limits::Limits;
 use s2n_quic::stream::{ReceiveStream, SendStream};
-use s2n_quic::{
-    Client, Server,
-    client::Connect,
-    connection::{Handle, StreamAcceptor},
-};
-use std::error::Error;
+use s2n_quic::{Client, Server, client::Connect};
+use std::task::Poll;
 use std::time::Duration;
 use std::{net::SocketAddr, sync::Arc};
-use tracing::info;
 
-fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, Box<dyn Error>> {
+fn get_server(
+    cert: &str,
+    priv_key: &str,
+    port: u16,
+) -> Result<Server, Box<dyn std::error::Error + 'static + Sync + Send>> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
@@ -31,7 +31,7 @@ fn get_server(cert: &str, priv_key: &str, port: u16) -> Result<Server, Box<dyn E
     Ok(server)
 }
 
-fn get_client(cert: &str) -> Result<Client, Box<dyn Error>> {
+fn get_client(cert: &str) -> Result<Client, Box<dyn std::error::Error + 'static + Sync + Send>> {
     let limits = Limits::new()
         .with_max_open_local_bidirectional_streams(1000)?
         .with_max_open_remote_bidirectional_streams(1000)?
@@ -89,11 +89,7 @@ impl Endpoint for S2nEndpoint {
                     let mut connection =
                         server.accept().await.ok_or(FusenNetError::EndpointClose)?;
                     let _ = connection.keep_alive(true);
-                    let (handle, acceptor) = connection.split();
-                    Ok(S2nConnect {
-                        handle,
-                        acceptor: Arc::new(Mutex::new(acceptor)),
-                    })
+                    Ok(S2nConnect { connection })
                 }
                 S2nEndpointInfo::Client(_client) => {
                     panic!("client cant accept !")
@@ -118,11 +114,7 @@ impl Endpoint for S2nEndpoint {
                         .connect(Connect::new(addr).with_server_name(server_name))
                         .await?;
                     let _ = connection.keep_alive(true);
-                    let (handle, acceptor) = connection.split();
-                    Ok(S2nConnect {
-                        handle,
-                        acceptor: Arc::new(Mutex::new(acceptor)),
-                    })
+                    Ok(S2nConnect { connection })
                 }
             }
         })
@@ -131,8 +123,7 @@ impl Endpoint for S2nEndpoint {
 
 #[derive(Debug)]
 pub struct S2nConnect {
-    handle: Handle,
-    acceptor: Arc<Mutex<StreamAcceptor>>,
+    connection: s2n_quic::connection::Connection,
 }
 
 impl StreamStop for ReceiveStream {
@@ -154,20 +145,19 @@ impl Connection for S2nConnect {
     fn open_bi(
         &self,
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), FusenNetError>> {
-        let mut connect = self.handle.clone();
+        let mut handle = self.connection.handle();
         Box::pin(async move {
-            let (recv_stream, send_stream) = connect.open_bidirectional_stream().await?.split();
+            let (recv_stream, send_stream) = handle.open_bidirectional_stream().await?.split();
             Ok((recv_stream, send_stream))
         })
     }
 
     fn accept_bi(
-        &self,
+        &mut self,
     ) -> BoxFuture<Result<(impl common::ReadStream, impl common::WriteStream), FusenNetError>> {
-        let acceptor = self.acceptor.clone();
         Box::pin(async move {
-            let mut connect = acceptor.lock().await;
-            let (recv_stream, send_stream) = connect
+            let (recv_stream, send_stream) = self
+                .connection
                 .accept_bidirectional_stream()
                 .await?
                 .ok_or(FusenNetError::EndpointClose)?
@@ -176,18 +166,52 @@ impl Connection for S2nConnect {
         })
     }
 
+    fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
+        let send_func = |x: &mut Sender| match x.send_datagram(bytes) {
+            Ok(_) => {}
+            Err(_err) => {}
+        };
+        self.connection
+            .datagram_mut(send_func)
+            .map_err(|error| FusenNetError::BoxError(Box::new(error)))
+    }
+
+    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+        Box::pin(async move {
+            let recv_result = futures::future::poll_fn(|cx| {
+                // datagram_mut takes a closure which calls the requested datagram function. The type
+                // of the closure parameter should be either the datagram Sender type or the
+                // datagram Receiver type. The datagram_mut function will check this type against
+                // its stored datagram Sender and Receiver, and if the type matches, the requested
+                // function will execute. Here, that requested function is poll_recv_datagram.
+                match self
+                    .connection
+                    .datagram_mut(|recv: &mut Receiver| recv.poll_recv_datagram(cx))
+                {
+                    // If the function is successfully called on the provider, it will return Poll<Bytes>.
+                    // Here we send an Ok() to wrap around the Bytes so the poll_fn doesn't complain.
+                    Ok(poll_value) => poll_value.map(Ok),
+                    // The datagram_mut function may return a query error if it can't find the type
+                    // referenced in the closure. Here we wrap the error in a Poll::Ready enum so the
+                    // poll_fn doesn't complain.
+                    Err(query_err) => Poll::Ready(Err(query_err)),
+                }
+            })
+            .await;
+            match recv_result {
+                Ok(result) => result.map_err(|error| FusenNetError::ConnectClose),
+                Err(error) => Err(FusenNetError::BoxError(Box::new(error))),
+            }
+        })
+    }
+
     fn remote_address(&self) -> SocketAddr {
-        self.handle.remote_addr().unwrap()
+        self.connection.remote_addr().unwrap()
     }
 
     fn closed(&self) -> BoxFuture<FusenNetError> {
-        let mut connect = self.handle.clone();
         Box::pin(async move {
-            if let Ok(stream) = connect.open_bidirectional_stream().await {
-                let (mut recv_stream, _send_stream) = stream.split();
-                let result = recv_stream.receive().await;
-                info!("closed result : {:?}", result);
-            }
+            self.connection.close(Error::new(0).unwrap());
             FusenNetError::ConnectClose
         })
     }
