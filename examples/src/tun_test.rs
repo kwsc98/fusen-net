@@ -49,7 +49,7 @@ async fn main_entry() -> Result<(), BoxError> {
     });
 
     let mut dev = tun::create_as_async(&config)?;
-    let mut data = [0; (DEFAULT_MTU as usize) + PACKET_INFORMATION_LENGTH];
+    let mut data = [0; (1200 as usize) + PACKET_INFORMATION_LENGTH];
     loop {
         let size = dev.read(&mut data).await?;
         let _ = dev.write(&data[..size]).await;

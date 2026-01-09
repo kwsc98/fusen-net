@@ -14,16 +14,6 @@ async fn main() {
         .await;
         println!("{:?}", result);
     });
-    tokio::spawn(async move {
-        let result = Server::run(ServerConfig {
-            port: 8088,
-            quic_lib: fusen_net::quic::Quiclib::GmQuic,
-            cert_pem: CERT_PEM.to_string(),
-            priv_key_pem: KEY_PEM.to_string(),
-        })
-        .await;
-        println!("{:?}", result);
-    });
     let result = Server::run(ServerConfig {
         port: 8089,
         quic_lib: fusen_net::quic::Quiclib::Quin,

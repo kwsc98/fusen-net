@@ -2,7 +2,6 @@ use super::{Connection, Endpoint, StreamStop};
 use crate::{common, error::FusenNetError};
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use gm_quic::qrecovery::streams::error;
 use quinn::{ClientConfig, Endpoint as QuicEndpoint, RecvStream, SendStream, ServerConfig, VarInt};
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, pem, pem::PemObject};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -12,9 +11,20 @@ fn make_client_endpoint(
     bind_addr: SocketAddr,
     server_certs: &[&str],
 ) -> Result<QuicEndpoint, FusenNetError> {
-    let client_cfg = configure_client(server_certs)?;
+    let mut client_cfg = configure_client(server_certs)?;
     let mut endpoint = QuicEndpoint::client(bind_addr)
         .map_err(|error| FusenNetError::BoxError(Box::new(error)))?;
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.keep_alive_interval(Some(Duration::from_millis(1000)));
+    transport_config.max_idle_timeout(Some(
+        Duration::from_millis(60000)
+            .try_into()
+            .map_err(|error| FusenNetError::BoxError(Box::new(error)))?,
+    ));
+    transport_config.datagram_receive_buffer_size(Some(128 * 1024));
+    transport_config.datagram_send_buffer_size(128 * 1024);
+    transport_config.max_concurrent_bidi_streams(1000u32.into());
+    client_cfg.transport_config(Arc::new(transport_config));
     endpoint.set_default_client_config(client_cfg);
     Ok(endpoint)
 }
@@ -48,6 +58,8 @@ fn make_server_endpoint(
             .try_into()
             .map_err(|error| FusenNetError::BoxError(Box::new(error)))?,
     ));
+    transport_config.datagram_receive_buffer_size(Some(128 * 1024));
+    transport_config.datagram_send_buffer_size(128 * 1024);
     transport_config.max_concurrent_bidi_streams(1000u32.into());
     let endpoint = QuicEndpoint::server(server_config, bind_addr)
         .map_err(|error| FusenNetError::BoxError(Box::new(error)))?;
@@ -108,6 +120,7 @@ impl Connection for QuinnConnect {
 
     fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
         self.connect
+        .send_datagram_wait(data)
             .send_datagram(bytes)
             .map_err(|error| FusenNetError::BoxError(Box::new(error)))
     }

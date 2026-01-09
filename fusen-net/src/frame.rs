@@ -14,7 +14,7 @@ pub enum Frame {
     RegisterResponse(RegisterResponse),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Register {
     pub authentication: String,
 }
@@ -36,7 +36,7 @@ impl Frame {
         let Some(first) = buf.first() else {
             return Err(FrameError::Incomplete);
         };
-        if first != &b'0' {
+        if first != &0 {
             return Err(FrameError::Other("parse verify error".into()));
         }
         let end = buf.len();

@@ -1,11 +1,12 @@
-use std::os::unix::net::SocketAddr;
-
 use bytes::Bytes;
-use gm_quic::qbase::frame;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
-    buffer::{DEFAULT_BUF_SIZE, StreamBuffer}, error::FusenNetError, frame::{Frame, Register, RegisterResponse}, gateway::{self, init_gateway}, quic::{Connection, Endpoint, Quiclib, quin::QuinnEndpoint, s2n::S2nEndpoint}
+    buffer::{DEFAULT_BUF_SIZE, StreamBuffer},
+    error::FusenNetError,
+    frame::{Frame, Register, RegisterResponse},
+    gateway::{self, init_gateway},
+    quic::{Connection, Endpoint, Quiclib, quin::QuinnEndpoint, s2n::S2nEndpoint},
 };
 
 pub struct Server;
@@ -53,18 +54,21 @@ impl Server {
 
     async fn handler(endpoint: impl Endpoint) -> Result<(), FusenNetError> {
         //初始化流量网关
-        let register_sender =  init_gateway().await?;
+        let register_sender = init_gateway().await?;
         while let Ok(connect) = endpoint.accept().await {
             let register_sender_clone = register_sender.clone();
             tokio::spawn(async move {
-                connect_handler(connect,register_sender_clone).await;
+                let _ = connect_handler(connect, register_sender_clone).await;
             });
         }
         Ok(())
     }
 }
 
-async fn connect_handler(mut connect: impl Connection,sender : UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>) -> Result<(), FusenNetError> {
+async fn connect_handler(
+    mut connect: impl Connection,
+    sender: UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>,
+) -> Result<(), FusenNetError> {
     let (read_stream, write_stream) = connect.accept_bi().await?;
     let mut buffer = StreamBuffer::new(read_stream, write_stream, DEFAULT_BUF_SIZE);
     let frame = buffer
@@ -74,6 +78,7 @@ async fn connect_handler(mut connect: impl Connection,sender : UnboundedSender<(
     let Frame::Register(registry) = frame else {
         return Err(FusenNetError::ConnectClose);
     };
+    let tun_ip = registry.authentication.clone();
     let result = registry_handler(registry).await?;
     let register_response = RegisterResponse {
         local_addr: result.clone(),
@@ -92,7 +97,7 @@ async fn connect_handler(mut connect: impl Connection,sender : UnboundedSender<(
     if result.is_none() {
         return Ok(());
     }
-    handler(,connect,sender).await
+    handler(tun_ip, connect, sender).await
 }
 
 async fn registry_handler(registry: Register) -> Result<Option<String>, FusenNetError> {
@@ -100,16 +105,24 @@ async fn registry_handler(registry: Register) -> Result<Option<String>, FusenNet
 }
 
 enum BytesFrame {
-    Connect(Result<bytes::Bytes,FusenNetError>),
+    Connect(Result<bytes::Bytes, FusenNetError>),
     Router(Option<bytes::Bytes>),
 }
 
-async fn handler(tun_ip : String,connect: impl Connection,sender : UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>) -> Result<(), FusenNetError> {
-    let (sender1,mut recv1) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    let (sender2,recv2) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    sender.send((gateway::Register{
-        tun_ip,
-        pack_send: sender1},recv2));
+async fn handler(
+    tun_ip: String,
+    connect: impl Connection,
+    sender: UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>,
+) -> Result<(), FusenNetError> {
+    let (sender1, mut recv1) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+    let (sender2, recv2) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+    sender.send((
+        gateway::Register {
+            tun_ip,
+            pack_send: sender1,
+        },
+        recv2,
+    ));
     loop {
         let frame = tokio::select! {
             bytes = connect.recv_datagram() => {
@@ -119,8 +132,21 @@ async fn handler(tun_ip : String,connect: impl Connection,sender : UnboundedSend
                BytesFrame::Router(bytes)
             }
         };
-        if let Some() =  {
-            
+        match frame {
+            BytesFrame::Connect(bytes) => {
+                if let Ok(bytes) = bytes {
+                    sender2.send(bytes);
+                } else {
+                    break;
+                }
+            }
+            BytesFrame::Router(bytes) => {
+                if let Some(bytes) = bytes {
+                    connect.send_datagram(bytes);
+                } else {
+                    break;
+                }
+            }
         }
     }
     Ok(())

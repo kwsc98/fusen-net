@@ -33,3 +33,4 @@ pnet = "0.35.0"
 uuid = { version = "1.16.0", features = ["v4"] }
 thiserror = "2.0.12"
 packet = "0.1.4"
+tun = { version = "0.8.5", features = ["async"] }
