@@ -1,11 +1,11 @@
-use super::{Connection, Endpoint, StreamStop};
+use super::{Connection, Endpoint as MyEndpoint, StreamStop};
 use crate::common::{self};
 use crate::error::FusenNetError;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use s2n_quic::application::Error;
-use s2n_quic::provider::datagram::default::{Receiver, Sender};
+use s2n_quic::provider::datagram::default::{Endpoint, Receiver, Sender};
 use s2n_quic::provider::limits::Limits;
 use s2n_quic::stream::{ReceiveStream, SendStream};
 use s2n_quic::{Client, Server, client::Connect};
@@ -23,10 +23,16 @@ fn get_server(
         .with_max_open_remote_bidirectional_streams(1000)?
         .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
+    let datagram_provider = Endpoint::builder()
+        .with_send_capacity(128 * 1024)?
+        .with_recv_capacity(128 * 1024)?
+        .build()
+        .unwrap();
     let server = Server::builder()
         .with_tls((cert, priv_key))?
         .with_io(format!("0.0.0.0:{}", port).as_str())?
-        .with_limits(limits)?  
+        .with_limits(limits)?
+        .with_datagram(datagram_provider)?
         .start()?;
     Ok(server)
 }
@@ -37,10 +43,16 @@ fn get_client(cert: &str) -> Result<Client, Box<dyn std::error::Error + 'static 
         .with_max_open_remote_bidirectional_streams(1000)?
         .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
+    let datagram_provider = Endpoint::builder()
+        .with_send_capacity(128 * 1024)?
+        .with_recv_capacity(128 * 1024)?
+        .build()
+        .unwrap();
     let client = Client::builder()
         .with_tls(cert)?
         .with_io("0.0.0.0:0")?
         .with_limits(limits)?
+        .with_datagram(datagram_provider)?
         .start()?;
     Ok(client)
 }
@@ -61,7 +73,7 @@ impl S2nEndpoint {
         bind_port: u16,
         cert: &str,
         prik: &str,
-    ) -> Result<impl Endpoint, FusenNetError> {
+    ) -> Result<impl MyEndpoint, FusenNetError> {
         let server =
             get_server(cert, prik, bind_port).map_err(|error| FusenNetError::BoxError(error))?;
         let endpoint = S2nEndpoint {
@@ -70,7 +82,7 @@ impl S2nEndpoint {
         Ok(endpoint)
     }
 
-    pub fn make_client_endpoint(cert: &str) -> Result<impl Endpoint + 'static, FusenNetError> {
+    pub fn make_client_endpoint(cert: &str) -> Result<impl MyEndpoint + 'static, FusenNetError> {
         let client = get_client(cert).map_err(|error| FusenNetError::BoxError(error))?;
         let endpoint = S2nEndpoint {
             endpoint: Arc::new(S2nEndpointInfo::Client(client)),
@@ -79,7 +91,7 @@ impl S2nEndpoint {
     }
 }
 
-impl Endpoint for S2nEndpoint {
+impl MyEndpoint for S2nEndpoint {
     fn accept(&self) -> BoxFuture<Result<impl Connection, FusenNetError>> {
         let endpoint = self.endpoint.clone();
         Box::pin(async move {

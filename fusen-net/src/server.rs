@@ -1,5 +1,9 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use dashmap::DashMap;
+use packet::ip;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     buffer::{DEFAULT_BUF_SIZE, StreamBuffer},
@@ -9,7 +13,9 @@ use crate::{
     quic::{Connection, Endpoint, Quiclib, quin::QuinnEndpoint, s2n::S2nEndpoint},
 };
 
-pub struct Server;
+pub struct Server {
+    job: ServerConfig,
+}
 
 pub struct ServerConfig {
     pub port: u16,
@@ -54,11 +60,12 @@ impl Server {
 
     async fn handler(endpoint: impl Endpoint) -> Result<(), FusenNetError> {
         //初始化流量网关
-        let register_sender = init_gateway().await?;
+        let (register_sender, map) = init_gateway().await?;
         while let Ok(connect) = endpoint.accept().await {
             let register_sender_clone = register_sender.clone();
+            let map_clone = map.clone();
             tokio::spawn(async move {
-                let _ = connect_handler(connect, register_sender_clone).await;
+                let _ = connect_handler(connect, register_sender_clone, map_clone).await;
             });
         }
         Ok(())
@@ -67,7 +74,8 @@ impl Server {
 
 async fn connect_handler(
     mut connect: impl Connection,
-    sender: UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>,
+    sender: UnboundedSender<gateway::Register>,
+    map: Arc<DashMap<String, UnboundedSender<Bytes>>>,
 ) -> Result<(), FusenNetError> {
     let (read_stream, write_stream) = connect.accept_bi().await?;
     let mut buffer = StreamBuffer::new(read_stream, write_stream, DEFAULT_BUF_SIZE);
@@ -97,7 +105,7 @@ async fn connect_handler(
     if result.is_none() {
         return Ok(());
     }
-    handler(tun_ip, connect, sender).await
+    handler(tun_ip, connect, sender, map).await
 }
 
 async fn registry_handler(registry: Register) -> Result<Option<String>, FusenNetError> {
@@ -112,30 +120,32 @@ enum BytesFrame {
 async fn handler(
     tun_ip: String,
     connect: impl Connection,
-    sender: UnboundedSender<(gateway::Register, UnboundedReceiver<Bytes>)>,
+    register_sender: UnboundedSender<gateway::Register>,
+    map: Arc<DashMap<String, UnboundedSender<Bytes>>>,
 ) -> Result<(), FusenNetError> {
-    let (sender1, mut recv1) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    let (sender2, recv2) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    sender.send((
-        gateway::Register {
-            tun_ip,
-            pack_send: sender1,
-        },
-        recv2,
-    ));
+    let (sender, mut recv) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+    register_sender.send(gateway::Register {
+        tun_ip,
+        pack_tun_send: sender,
+    });
     loop {
         let frame = tokio::select! {
             bytes = connect.recv_datagram() => {
                BytesFrame::Connect(bytes)
             },
-            bytes = recv1.recv() => {
+            bytes = recv.recv() => {
                BytesFrame::Router(bytes)
             }
         };
         match frame {
             BytesFrame::Connect(bytes) => {
                 if let Ok(bytes) = bytes {
-                    sender2.send(bytes);
+                    if let Ok(packet) = ip::v4::Packet::new(bytes.as_ref()) {
+                        if let Some(sned) = map.get(&packet.destination().to_string()) {
+                            let sned = sned.clone();
+                            let _ = sned.send(bytes);
+                        }
+                    }
                 } else {
                     break;
                 }

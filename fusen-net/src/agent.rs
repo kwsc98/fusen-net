@@ -58,7 +58,6 @@ impl Agent {
     }
 
     async fn handler(config: AgentConfig, endpoint: impl Endpoint) -> Result<(), FusenNetError> {
-        //初始化流量网关
         let connection = endpoint
             .connect(
                 config
@@ -103,6 +102,7 @@ impl Agent {
     }
 }
 
+#[derive(Debug)]
 enum TunFrame {
     Tun(Option<Bytes>),
     Read(Result<usize, io::Error>),
@@ -118,7 +118,7 @@ fn license_tun(
         .address(local_addr)
         .netmask((255, 255, 255, 0))
         .destination((10, 0, 0, 1))
-        .mtu(DEFAULT_MTU)
+        .mtu(1100)
         .up();
     #[cfg(target_os = "linux")]
     config.platform_config(|config| {
@@ -133,7 +133,7 @@ fn license_tun(
     let mut dev =
         tun::create_as_async(&config).map_err(|error| FusenNetError::BoxError(Box::new(error)))?;
     tokio::spawn(async move {
-        let mut data = [0; (DEFAULT_MTU as usize) + PACKET_INFORMATION_LENGTH];
+        let mut data = [0; (1100) + PACKET_INFORMATION_LENGTH];
         loop {
             let frame = tokio::select! {
                 recv = tun_recv.recv() => {
@@ -146,15 +146,18 @@ fn license_tun(
             if let TunFrame::Read(Ok(size)) = frame {
                 let bytes = Bytes::copy_from_slice(&data[..size]);
                 let _ = connect_sender.send(bytes);
-            }
-            if let TunFrame::Tun(Some(bytes)) = frame {
+            } else if let TunFrame::Tun(Some(bytes)) = frame {
                 let _ = dev.write(&bytes).await;
+            } else {
+                info!("license_tun error : {frame:?}");
+                return;
             }
         }
     });
     Ok(tun_sender)
 }
 
+#[derive(Debug)]
 enum RouterFrame {
     QuicConnect(Result<Bytes, FusenNetError>),
     Read(Option<Bytes>),
@@ -178,6 +181,9 @@ async fn router(
             let _ = tun_sender.send(bytes);
         } else if let RouterFrame::Read(Some(bytes)) = frame {
             let _ = connect.send_datagram(bytes);
+        } else {
+            info!("router error : {frame:?}");
+            return Ok(());
         }
     }
 }

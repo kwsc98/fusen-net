@@ -120,7 +120,6 @@ impl Connection for QuinnConnect {
 
     fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
         self.connect
-        .send_datagram_wait(data)
             .send_datagram(bytes)
             .map_err(|error| FusenNetError::BoxError(Box::new(error)))
     }

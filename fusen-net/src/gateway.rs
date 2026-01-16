@@ -1,79 +1,50 @@
-use std::collections::HashMap;
+use std::{sync::Arc, time::Duration};
 
-use ::packet::ip;
 use bytes::Bytes;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use dashmap::DashMap;
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::info;
 
 use crate::error::FusenNetError;
 
+#[derive(Clone)]
 pub struct Register {
     pub tun_ip: String,
-    pub pack_send: tokio::sync::mpsc::UnboundedSender<Bytes>,
+    pub pack_tun_send: tokio::sync::mpsc::UnboundedSender<Bytes>,
 }
 
-pub async fn init_gateway()
--> Result<UnboundedSender<(Register, UnboundedReceiver<Bytes>)>, FusenNetError> {
-    let (send, mut recv) =
-        tokio::sync::mpsc::unbounded_channel::<(Register, UnboundedReceiver<Bytes>)>();
-    let (packet_sender, packet_recv) = tokio::sync::mpsc::unbounded_channel::<Packet>();
-    let register_sender = router(packet_recv).await?;
+pub async fn init_gateway() -> Result<
+    (
+        UnboundedSender<Register>,
+        Arc<DashMap<String, UnboundedSender<Bytes>>>,
+    ),
+    FusenNetError,
+> {
+    let (send, mut recv) = tokio::sync::mpsc::unbounded_channel::<Register>();
+    let map = Arc::new(DashMap::new());
+    let map_clone = map.clone();
+    let map_clone_3 = map.clone();
     tokio::spawn(async move {
         loop {
-            if let Some((register, mut recv)) = recv.recv().await {
-                register_sender.send(register);
-                let packet_sender_clone = packet_sender.clone();
+            if let Some(register) = recv.recv().await {
+                let _ = map_clone.insert(register.tun_ip.clone(), register.pack_tun_send.clone());
+                info!("{} 已注册", register.tun_ip);
+                let map_clone_2 = map_clone.clone();
                 tokio::spawn(async move {
-                    while let Some(pack) = recv.recv().await {
-                        //解析目标ip的地址
-                        if let Ok(packet) = ip::v4::Packet::new(pack.as_ref()) {
-                            packet_sender_clone.send(Packet {
-                                tun_ip: packet.destination().to_string(),
-                                bytes: pack,
-                            });
-                        }
-                    }
+                    register.pack_tun_send.closed().await;
+                    let _ = map_clone_2.remove(&register.tun_ip);
+                    info!("{} 已断开连接", register.tun_ip);
                 });
             }
         }
     });
-    Ok(send)
-}
-
-struct Packet {
-    tun_ip: String,
-    bytes: Bytes,
-}
-
-enum Frame {
-    Packet(Option<Packet>),
-    Register(Option<Register>),
-}
-
-async fn router(
-    mut recv: UnboundedReceiver<Packet>,
-) -> Result<UnboundedSender<Register>, FusenNetError> {
-    let (register_sender, mut registry_recv) = tokio::sync::mpsc::unbounded_channel::<Register>();
     tokio::spawn(async move {
-        let mut hash_map: HashMap<String, UnboundedSender<Bytes>> = HashMap::new();
         loop {
-            let frame = tokio::select! {
-                packet = recv.recv() => {
-                    Frame::Packet(packet)
-                }
-                register = registry_recv.recv() => {
-                    Frame::Register(register)
-                }
-            };
-            if let Frame::Packet(Some(packet)) = frame {
-                if let Some(sender) = hash_map.get_mut(&packet.tun_ip) {
-                    if let Err(_error) = sender.send(packet.bytes) {
-                        let _ = hash_map.remove(&packet.tun_ip);
-                    }
-                }
-            } else if let Frame::Register(Some(register)) = frame {
-                let _ = hash_map.insert(register.tun_ip, register.pack_send);
+            loop {
+                let _ = tokio::time::sleep(Duration::from_secs(10)).await;
+                info!("存活的agent {map_clone_3:?}");
             }
         }
     });
-    Ok(register_sender)
+    Ok((send, map))
 }
