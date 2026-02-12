@@ -24,8 +24,8 @@ fn get_server(
         .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
     let datagram_provider = Endpoint::builder()
-        .with_send_capacity(128 * 1024)?
-        .with_recv_capacity(128 * 1024)?
+        .with_send_capacity(32 * 1024 * 10)?
+        .with_recv_capacity(32 * 1024 * 10)?
         .build()
         .unwrap();
     let server = Server::builder()
@@ -44,8 +44,8 @@ fn get_client(cert: &str) -> Result<Client, Box<dyn std::error::Error + 'static 
         .with_max_idle_timeout(Duration::from_secs(60))?
         .with_max_keep_alive_period(Duration::from_secs(1))?;
     let datagram_provider = Endpoint::builder()
-        .with_send_capacity(128 * 1024)?
-        .with_recv_capacity(128 * 1024)?
+        .with_send_capacity(32 * 1024 * 10)?
+        .with_recv_capacity(32 * 1024 * 10)?
         .build()
         .unwrap();
     let client = Client::builder()
@@ -188,7 +188,7 @@ impl Connection for S2nConnect {
             .map_err(|error| FusenNetError::BoxError(Box::new(error)))
     }
 
-    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+    fn recv_datagram(&mut self) -> BoxFuture<Result<Bytes, FusenNetError>> {
         Box::pin(async move {
             let recv_result = futures::future::poll_fn(|cx| {
                 // datagram_mut takes a closure which calls the requested datagram function. The type

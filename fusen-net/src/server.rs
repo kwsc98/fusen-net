@@ -10,7 +10,7 @@ use crate::{
     error::FusenNetError,
     frame::{Frame, Register, RegisterResponse},
     gateway::{self, init_gateway},
-    quic::{Connection, Endpoint, Quiclib, quin::QuinnEndpoint, s2n::S2nEndpoint},
+    quic::{Connection, Endpoint, Quiclib, gm_quic::GmQuicEndpoint, quin::QuinnEndpoint, s2n::S2nEndpoint},
 };
 
 pub struct Server {
@@ -31,13 +31,13 @@ impl Server {
         let priv_key_pem = config.priv_key_pem;
         match config.quic_lib {
             Quiclib::GmQuic => {
-                todo!()
-                // Self::handler(GmQuicEndpoint::make_server_endpoint(
-                //     port,
-                //     cert_pem.as_str(),
-                //     priv_key_pem.as_str(),
-                // )?)
-                // .await
+                // todo!()
+                Self::handler(GmQuicEndpoint::make_server_endpoint(
+                    port,
+                    cert_pem.as_str(),
+                    priv_key_pem.as_str(),
+                )?)
+                .await
             }
             Quiclib::Quin => {
                 Self::handler(QuinnEndpoint::make_server_endpoint(
@@ -119,12 +119,12 @@ enum BytesFrame {
 
 async fn handler(
     tun_ip: String,
-    connect: impl Connection,
+    mut connect: impl Connection,
     register_sender: UnboundedSender<gateway::Register>,
     map: Arc<DashMap<String, UnboundedSender<Bytes>>>,
 ) -> Result<(), FusenNetError> {
     let (sender, mut recv) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    register_sender.send(gateway::Register {
+    let _ = register_sender.send(gateway::Register {
         tun_ip,
         pack_tun_send: sender,
     });

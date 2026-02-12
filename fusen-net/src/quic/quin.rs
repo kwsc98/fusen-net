@@ -124,7 +124,7 @@ impl Connection for QuinnConnect {
             .map_err(|error| FusenNetError::BoxError(Box::new(error)))
     }
 
-    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+    fn recv_datagram(&mut self) -> BoxFuture<Result<Bytes, FusenNetError>> {
         Box::pin(async move {
             self.connect
                 .read_datagram()

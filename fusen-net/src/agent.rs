@@ -4,7 +4,10 @@ use crate::{
     buffer::{self, DEFAULT_BUF_SIZE, StreamBuffer},
     error::FusenNetError,
     frame::{Frame, Register},
-    quic::{Connection, Endpoint, Quiclib, quin::QuinnEndpoint, s2n::S2nEndpoint},
+    quic::{
+        Connection, Endpoint, Quiclib, gm_quic::GmQuicEndpoint, quin::QuinnEndpoint,
+        s2n::S2nEndpoint,
+    },
 };
 use bytes::Bytes;
 use gm_quic::qinterface::local;
@@ -32,13 +35,12 @@ impl Agent {
         let cert_pem = config.cert_pem.clone();
         match &config.quic_lib {
             Quiclib::GmQuic => {
-                todo!()
-                // Self::handler(GmQuicEndpoint::make_server_endpoint(
-                //     port,
-                //     cert_pem.as_str(),
-                //     priv_key_pem.as_str(),
-                // )?)
-                // .await
+                // todo!()
+                Self::handler(
+                    config,
+                    GmQuicEndpoint::make_client_endpoint(cert_pem.as_str())?,
+                )
+                .await
             }
             Quiclib::Quin => {
                 Self::handler(
@@ -164,7 +166,7 @@ enum RouterFrame {
 }
 
 async fn router(
-    connect: impl Connection,
+    mut connect: impl Connection,
     mut connect_recv: tokio::sync::mpsc::UnboundedReceiver<Bytes>,
     tun_sender: tokio::sync::mpsc::UnboundedSender<Bytes>,
 ) -> Result<(), FusenNetError> {

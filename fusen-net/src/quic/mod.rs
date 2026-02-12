@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 use std::net::SocketAddr;
 
-// pub mod gm_quic;
+pub mod gm_quic;
 pub mod quin;
 pub mod s2n;
 
@@ -41,7 +41,7 @@ pub trait Connection: Sync + Send + 'static {
 
     fn send_datagram(&self, bytes: Bytes) -> Result<(), FusenNetError>;
 
-    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>>;
+    fn recv_datagram(&mut self) -> BoxFuture<Result<Bytes, FusenNetError>>;
 
     fn remote_address(&self) -> SocketAddr;
 

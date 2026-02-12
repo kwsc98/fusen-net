@@ -1,12 +1,12 @@
 use super::{Connection, Endpoint, StreamStop};
 use crate::common::{self};
 use crate::error::FusenNetError;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::future::BoxFuture;
 use gm_quic::prelude::{
-    BindUri, BuildListenersError, CancelStream, Connection as GmConnect, EndpointAddr,
-    ParseBindUriError, QuicClient, QuicListeners, ServerError, SocketEndpointAddr, StopSending,
-    StreamReader, StreamWriter, handy,
+    BindUri, BuildListenersError, CancelStream, Connection as GmConnect, DatagramReader,
+    DatagramWriter, EndpointAddr, ParseBindUriError, QuicClient, QuicListeners, ServerError,
+    SocketEndpointAddr, StopSending, StreamReader, StreamWriter, handy,
 };
 use rustls::RootCertStore;
 use rustls::crypto::ring::default_provider;
@@ -31,6 +31,8 @@ pub fn generate_signed<'a>(priv_key: &str, cert: &str) -> Result<CertifiedKeyV2<
 
 pub struct GmQuicConnect {
     connect: GmConnect,
+    datagram_writer: DatagramWriter,
+    datagram_reader: DatagramReader,
     remote_address: EndpointAddr,
 }
 
@@ -90,11 +92,17 @@ impl Connection for GmQuicConnect {
     }
 
     fn send_datagram(&self, bytes: bytes::Bytes) -> Result<(), FusenNetError> {
-        todo!()
+        self.datagram_writer
+            .send_bytes(bytes)
+            .map_err(|error| FusenNetError::BoxError(Box::new(error)))
     }
 
-    fn recv_datagram(&self) -> BoxFuture<Result<Bytes, FusenNetError>> {
-        todo!()
+    fn recv_datagram(&mut self) -> BoxFuture<Result<Bytes, FusenNetError>> {
+        Box::pin(async move {
+            let mut bytes = BytesMut::new();
+            self.datagram_reader.recv();
+            Ok(bytes.freeze())
+        })
     }
 
     fn remote_address(&self) -> SocketAddr {
@@ -205,8 +213,12 @@ impl Endpoint for GmQuicEndpoint {
             let (connect, _, addr, _) = server.accept().await.map_err(|error| {
                 FusenNetError::GmQuicConnectError(io::Error::other(error.to_string()))
             })?;
+            let w = connect.unreliable_writer().await.unwrap().unwrap();
+            let r = connect.unreliable_reader().unwrap().unwrap();
             Ok(GmQuicConnect {
                 connect,
+                datagram_writer: w,
+                datagram_reader: r,
                 remote_address: addr.remote(),
             })
         })
@@ -228,8 +240,12 @@ impl Endpoint for GmQuicEndpoint {
                 .map_err(|error| {
                     FusenNetError::GmQuicConnectError(io::Error::other(error.to_string()))
                 })?;
+            let w = connect.unreliable_writer().await.unwrap().unwrap();
+            let r = connect.unreliable_reader().unwrap().unwrap();
             Ok(GmQuicConnect {
                 connect,
+                datagram_writer: w,
+                datagram_reader: r,
                 remote_address: addr,
             })
         })
