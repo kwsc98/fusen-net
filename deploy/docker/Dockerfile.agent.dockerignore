@@ -1,0 +1,14 @@
+.git
+.github
+target
+docs
+tests
+deploy
+configs
+examples
+*.md
+!README.md
+LICENSE
+.idea
+.vscode
+.DS_Store

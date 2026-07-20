@@ -1,0 +1,95 @@
+name: fusen-net
+
+services:
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+    image: fusen-net/server:local
+    command: ["server", "--config", "/etc/fusen-net/server.toml"]
+    environment:
+      FUSEN_CERT_FILE: /run/secrets/server_cert
+      FUSEN_KEY_FILE: /run/secrets/server_key
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      - "7000:7000/udp"
+      - "7001:7001/udp"
+      - "7002:7002/udp"
+    volumes:
+      - ../../configs/server.example.toml:/etc/fusen-net/server.toml:ro
+      - ../../configs/nodes.example.toml:/etc/fusen-net/nodes.example.toml:ro
+    secrets:
+      - source: server_cert
+        target: server_cert
+        uid: "10001"
+        gid: "10001"
+        mode: 0444
+      - source: server_key
+        target: server_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      overlay-control:
+        ipv4_address: 172.30.0.10
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    restart: unless-stopped
+
+  agent:
+    profiles: [agent]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.agent
+    image: fusen-net/agent:local
+    command: ["agent", "--config", "/etc/fusen-net/agent.toml"]
+    environment:
+      FUSEN_SERVER_ADDR: 172.30.0.10:7000
+      FUSEN_CA_FILE: /run/secrets/agent_ca
+      FUSEN_TOKEN_FILE: /run/secrets/agent_token
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - ../../configs/agent.example.toml:/etc/fusen-net/agent.toml:ro
+    secrets:
+      - source: agent_ca
+        target: agent_ca
+        mode: 0444
+      - source: agent_token
+        target: agent_token
+        mode: 0400
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    privileged: false
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /run/fusen-net:size=4m,mode=0700
+    networks:
+      - overlay-control
+    depends_on:
+      - relay
+    restart: unless-stopped
+
+networks:
+  overlay-control:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+secrets:
+  server_cert:
+    file: ${FUSEN_SERVER_CERT_FILE:-./secrets/server.pem}
+  server_key:
+    file: ${FUSEN_SERVER_KEY_FILE:-./secrets/server-key.pem}
+  agent_ca:
+    file: ${FUSEN_AGENT_CA_FILE:-./secrets/ca.pem}
+  agent_token:
+    file: ${FUSEN_AGENT_TOKEN_FILE:-./secrets/edge-a.token}

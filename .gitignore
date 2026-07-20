@@ -2,4 +2,10 @@ target/
 .idea/
 .vscode/
 .DS_Store
-Cargo.lock
+/secrets/
+/certs/
+/configs/secrets/
+/configs/certs/
+*.token
+*.key
+*-key.pem

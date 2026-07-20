@@ -1,0 +1,10 @@
+version = 1
+
+[agent]
+node_id = "edge-a"
+server_addr = "127.0.0.1:7000"
+backend = "quinn"
+server_name = "localhost"
+ca_file = "certs/ca.pem"
+token_file = "secrets/edge-a.token"
+tun_name = "fusen0"

@@ -1,0 +1,23 @@
+version = 1
+
+[server]
+overlay_cidr = "10.88.0.0/24"
+mtu = 1100
+nodes_file = "nodes.example.toml"
+
+[tls]
+server_name = "localhost"
+cert_file = "certs/server.pem"
+key_file = "certs/server-key.pem"
+
+[[listeners]]
+backend = "quinn"
+bind = "0.0.0.0:7000"
+
+[[listeners]]
+backend = "s2n"
+bind = "0.0.0.0:7001"
+
+[[listeners]]
+backend = "gm-quic"
+bind = "0.0.0.0:7002"

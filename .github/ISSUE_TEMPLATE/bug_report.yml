@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a reproducible defect in Fusen Net
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include tokens, private keys, packet payloads, or other secrets. For security vulnerabilities, use the private security advisory link instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `fusen-net --version` or the commit SHA.
+      placeholder: fusen-net 0.1.0-alpha.1
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Role
+      options: [Relay server, Edge agent, Both]
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: QUIC backend
+      options: [Quinn, s2n-quic, gm-quic, Multiple or unknown]
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS, architecture, and whether this runs natively or in a container.
+      placeholder: Ubuntu 24.04, x86_64, native
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest repeatable sequence and a sanitized configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I removed tokens, private keys, packet payloads, and personally identifying data.
+          required: true
+        - label: I searched existing issues for this problem.
+          required: true

@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+ARG RUST_VERSION=1.97.0
+FROM rust:${RUST_VERSION}-bookworm AS builder
+
+WORKDIR /src
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends clang cmake libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates ./crates
+COPY apps ./apps
+COPY vendor ./vendor
+
+RUN cargo build \
+    --package fusen-net-cli \
+    --bin fusen-net \
+    --release \
+    --locked \
+    --features all-backends
+
+FROM debian:bookworm-slim AS runtime
+
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="Fusen Net agent" \
+      org.opencontainers.image.description="TUN edge agent for Fusen Net" \
+      org.opencontainers.image.source="https://github.com/kwsc98/fusen-net" \
+      org.opencontainers.image.licenses="Apache-2.0 OR MIT" \
+      org.opencontainers.image.version="${VERSION}"
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates iproute2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /etc/fusen-net /run/fusen-net
+
+COPY --from=builder /src/target/release/fusen-net /usr/local/bin/fusen-net
+
+ENV RUST_LOG=info
+STOPSIGNAL SIGTERM
+
+ENTRYPOINT ["/usr/local/bin/fusen-net"]
+CMD ["agent", "--config", "/etc/fusen-net/agent.toml"]

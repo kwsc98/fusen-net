@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  quality:
+    name: Format, lint, test, and docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust 1.97.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-on-failure: true
+
+      - name: Verify the committed lockfile
+        shell: bash
+        run: |
+          test -f Cargo.lock
+          cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Test vendored transport patches
+        shell: bash
+        run: |
+          cargo fmt --manifest-path vendor/qunreliable/Cargo.toml -- --check
+          cargo clippy --manifest-path vendor/qunreliable/Cargo.toml \
+            --all-targets --locked -- -D warnings
+          cargo test --manifest-path vendor/qunreliable/Cargo.toml --locked
+          cargo fmt --manifest-path vendor/qconnection/Cargo.toml -- --check
+          cargo clippy --manifest-path vendor/qconnection/Cargo.toml \
+            --all-targets --locked -- -D warnings
+          cargo test --manifest-path vendor/qconnection/Cargo.toml --locked
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --all-features --no-deps --locked
+
+  backend-features:
+    name: Backend / ${{ matrix.feature }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        feature:
+          - backend-quinn
+          - backend-s2n
+          - backend-gm-quic
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust 1.97.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.feature }}
+
+      - name: Check core backend in isolation
+        run: >-
+          cargo check -p fusen-net --all-targets --locked
+          --no-default-features --features ${{ matrix.feature }}
+
+      - name: Check CLI backend in isolation
+        run: >-
+          cargo check -p fusen-net-cli --all-targets --locked
+          --no-default-features --features ${{ matrix.feature }}
+
+  native-build:
+    name: Build / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install Rust 1.97.0
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build all transports
+        run: >-
+          cargo build -p fusen-net-cli --bin fusen-net --release --locked
+          --target ${{ matrix.target }} --features all-backends
+
+      - name: Run platform unit and integration tests
+        run: >-
+          cargo test --workspace --all-features --locked
+          --target ${{ matrix.target }}

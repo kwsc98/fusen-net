@@ -1,0 +1,70 @@
+name: Real TUN E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform runner to exercise
+        type: choice
+        options: [all, linux, macos, windows]
+        default: all
+        required: true
+      scenario:
+        description: Native-TUN scenario set
+        type: choice
+        options: [standard, fault, soak, all]
+        default: standard
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-tun-${{ inputs.platform }}-${{ inputs.scenario }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  linux:
+    if: inputs.platform == 'all' || inputs.platform == 'linux'
+    runs-on: [self-hosted, Linux, X64, fusen-net-tun]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+      - name: Run real TUN scenarios
+        run: bash tests/e2e/run-real-tun.sh linux "${{ inputs.scenario }}"
+
+  macos:
+    if: >-
+      (inputs.platform == 'all' || inputs.platform == 'macos') &&
+      (inputs.scenario == 'standard' || inputs.scenario == 'all')
+    runs-on: [self-hosted, macOS, X64, fusen-net-tun]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+      - name: Run real TUN scenarios
+        run: bash tests/e2e/run-real-tun.sh macos "${{ inputs.scenario }}"
+
+  windows:
+    if: >-
+      (inputs.platform == 'all' || inputs.platform == 'windows') &&
+      (inputs.scenario == 'standard' || inputs.scenario == 'all')
+    runs-on: [self-hosted, Windows, X64, fusen-net-tun]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+      - name: Run real TUN scenarios
+        shell: pwsh
+        run: ./tests/e2e/run-real-tun.ps1 -Scenario "${{ inputs.scenario }}"

@@ -1,0 +1,40 @@
+[package]
+name = "fusen-net-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line application for the Fusen Net overlay network"
+publish = false
+
+[[bin]]
+name = "fusen-net"
+path = "src/main.rs"
+doc = false
+
+[features]
+default = ["all-backends"]
+backend-quinn = ["fusen-net/backend-quinn"]
+backend-s2n = ["fusen-net/backend-s2n"]
+backend-gm-quic = ["fusen-net/backend-gm-quic"]
+all-backends = ["backend-quinn", "backend-s2n", "backend-gm-quic"]
+
+[dependencies]
+base64.workspace = true
+clap.workspace = true
+fusen-net = { path = "../../crates/fusen-net", default-features = false }
+ipnet.workspace = true
+rand.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

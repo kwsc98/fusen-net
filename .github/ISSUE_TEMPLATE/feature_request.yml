@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a scoped capability or behavior change
+title: "[Feature]: "
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete networking or operational problem.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the externally visible behavior, including configuration or protocol effects.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility impact
+      options:
+        - No wire or configuration change
+        - Backward-compatible wire or configuration extension
+        - Breaking wire or configuration change
+        - Unknown
+    validations:
+      required: true

@@ -1,0 +1,530 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.verified_tag.outputs.commit }}
+      is_stable: ${{ steps.release.outputs.is_stable }}
+      release_channel: ${{ steps.release.outputs.release_channel }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify signed tag and main ancestry
+        id: verified_tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag_ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}")"
+          test "$(jq -r '.object.type' <<<"$tag_ref")" = tag || {
+            echo "release tag must be an annotated signed tag" >&2
+            exit 1
+          }
+          tag_object="$(jq -r '.object.sha' <<<"$tag_ref")"
+          tag_payload="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object}")"
+          verified="$(jq -r '.verification.verified' <<<"$tag_payload")"
+          test "$verified" = true || {
+            echo "GitHub did not verify the release tag signature" >&2
+            exit 1
+          }
+          test "$(jq -r '.object.type' <<<"$tag_payload")" = commit || {
+            echo "release tag must point directly to a commit" >&2
+            exit 1
+          }
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          release_commit="$(jq -r '.object.sha' <<<"$tag_payload")"
+          test "$(git rev-parse HEAD)" = "$release_commit" || {
+            echo "checked-out tag does not match the verified tag commit" >&2
+            exit 1
+          }
+          git merge-base --is-ancestor "$release_commit" origin/main || {
+            echo "release tag commit is not reachable from origin/main" >&2
+            exit 1
+          }
+          echo "commit=$release_commit" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Match tag to Cargo package version
+        id: release
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag="$RELEASE_TAG"
+          package_version="$({ cargo metadata --locked --no-deps --format-version 1; } \
+            | jq -r '.packages[] | select(.name == "fusen-net-cli") | .version')"
+          test "v${package_version}" = "$tag" || {
+            echo "tag $tag does not match fusen-net-cli version $package_version" >&2
+            exit 1
+          }
+
+          changelog_prefix="## [${package_version}] - "
+          changelog_count="$(grep -Fc "$changelog_prefix" CHANGELOG.md || true)"
+          test "$changelog_count" -eq 1 || {
+            echo "CHANGELOG.md must contain exactly one dated section for $package_version" >&2
+            exit 1
+          }
+          changelog_heading="$(grep -F "$changelog_prefix" CHANGELOG.md)"
+          changelog_date="${changelog_heading#"$changelog_prefix"}"
+          [[ "$changelog_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
+            echo "CHANGELOG.md section for $package_version must use YYYY-MM-DD" >&2
+            exit 1
+          }
+
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            is_stable=true
+            release_channel=stable
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)(\.[0-9]+)?$ ]]; then
+            is_stable=false
+            release_channel="${BASH_REMATCH[1]}"
+          else
+            echo "release tag must be vX.Y.Z or vX.Y.Z-{alpha,beta,rc}[.N], got: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "is_stable=$is_stable" >> "$GITHUB_OUTPUT"
+          echo "release_channel=$release_channel" >> "$GITHUB_OUTPUT"
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Run release Clippy gate
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Run release tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Build release documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --all-features --no-deps --locked
+
+      - name: Check each transport feature in isolation
+        shell: bash
+        run: |
+          for feature in backend-quinn backend-s2n backend-gm-quic; do
+            cargo check -p fusen-net --all-targets --locked \
+              --no-default-features --features "$feature"
+            cargo check -p fusen-net-cli --all-targets --locked \
+              --no-default-features --features "$feature"
+          done
+
+      - name: Validate vendored transport patches
+        shell: bash
+        run: |
+          for manifest in \
+            vendor/qunreliable/Cargo.toml \
+            vendor/qconnection/Cargo.toml; do
+            cargo fmt --manifest-path "$manifest" -- --check
+            cargo clippy --manifest-path "$manifest" \
+              --all-targets --locked -- -D warnings
+            cargo test --manifest-path "$manifest" --locked
+          done
+
+  policy:
+    name: Validate dependency policy
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
+        with:
+          command: check
+          arguments: --all-features
+
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  real-tun-linux:
+    name: Stable gate / Linux real TUN
+    needs: validate
+    if: needs.validate.outputs.is_stable == 'true'
+    runs-on: [self-hosted, Linux, X64, fusen-net-tun]
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+
+      - name: Run stable real TUN gate
+        run: bash tests/e2e/run-real-tun.sh linux all
+
+  real-tun-macos:
+    name: Stable gate / macOS real TUN
+    needs: validate
+    if: needs.validate.outputs.is_stable == 'true'
+    runs-on: [self-hosted, macOS, X64, fusen-net-tun]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+
+      - name: Run stable real TUN gate
+        env:
+          FUSEN_REAL_TUN_REQUIRE_FULL: 1
+        run: bash tests/e2e/run-real-tun.sh macos standard
+
+  real-tun-windows:
+    name: Stable gate / Windows real TUN
+    needs: validate
+    if: needs.validate.outputs.is_stable == 'true'
+    runs-on: [self-hosted, Windows, X64, fusen-net-tun]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+
+      - name: Run stable real TUN gate
+        shell: pwsh
+        run: ./tests/e2e/run-real-tun.ps1 -Scenario standard -RequireFullOverlay
+
+  release-gate:
+    name: Resolve release qualification
+    needs: [validate, policy, real-tun-linux, real-tun-macos, real-tun-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ needs.validate.outputs.tag }}
+      commit: ${{ needs.validate.outputs.commit }}
+      is_stable: ${{ needs.validate.outputs.is_stable }}
+      release_channel: ${{ needs.validate.outputs.release_channel }}
+    env:
+      IS_STABLE: ${{ needs.validate.outputs.is_stable }}
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      POLICY_RESULT: ${{ needs.policy.result }}
+      LINUX_TUN_RESULT: ${{ needs.real-tun-linux.result }}
+      MACOS_TUN_RESULT: ${{ needs.real-tun-macos.result }}
+      WINDOWS_TUN_RESULT: ${{ needs.real-tun-windows.result }}
+    steps:
+      - name: Enforce release gates
+        shell: bash
+        run: |
+          if [[ "$VALIDATE_RESULT" != success || "$POLICY_RESULT" != success ]]; then
+            echo "validation or dependency policy gate failed" >&2
+            exit 1
+          fi
+
+          if [[ "$IS_STABLE" == true ]]; then
+            for result in "$LINUX_TUN_RESULT" "$MACOS_TUN_RESULT" "$WINDOWS_TUN_RESULT"; do
+              if [[ "$result" != success ]]; then
+                echo "all three real TUN jobs must pass before a stable release" >&2
+                exit 1
+              fi
+            done
+            echo "stable release qualified by all three real TUN jobs"
+          else
+            echo "::warning::prerelease publication skips the stable real TUN gates"
+          fi
+
+  build:
+    name: Package / ${{ matrix.target }}
+    needs: release-gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-gate.outputs.commit }}
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: >-
+          cargo build -p fusen-net-cli --bin fusen-net --release --locked
+          --target ${{ matrix.target }} --features all-backends
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist/package
+          cp "target/${{ matrix.target }}/release/fusen-net" dist/package/fusen-net
+          cp README.md LICENSE-APACHE LICENSE-MIT dist/package/
+          tar -C dist/package -czf "dist/fusen-net-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.tar.gz" .
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/fusen-net.exe" dist/package/
+          Copy-Item "target/${{ matrix.target }}/release/wintun.dll" dist/package/
+          Copy-Item README.md, LICENSE-APACHE, LICENSE-MIT dist/package/
+          & dist/package/fusen-net.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/fusen-net-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.zip"
+
+      - name: Upload package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fusen-net-${{ matrix.target }}
+          path: dist/fusen-net-*
+          if-no-files-found: error
+
+  container:
+    name: Publish Linux containers
+    needs: release-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      attestations: write
+    outputs:
+      server_digest: ${{ steps.server_build.outputs.digest }}
+      agent_digest: ${{ steps.agent_build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-gate.outputs.commit }}
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Server image metadata
+        id: server_meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}/server
+          tags: |
+            type=raw,value=${{ needs.release-gate.outputs.tag }}
+
+      - name: Build and publish server image
+        id: server_build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.server
+          platforms: linux/amd64
+          push: true
+          build-args: VERSION=${{ needs.release-gate.outputs.tag }}
+          tags: ${{ steps.server_meta.outputs.tags }}
+          labels: ${{ steps.server_meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Agent image metadata
+        id: agent_meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}/agent
+          tags: |
+            type=raw,value=${{ needs.release-gate.outputs.tag }}
+
+      - name: Build and publish agent image
+        id: agent_build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.agent
+          platforms: linux/amd64
+          push: true
+          build-args: VERSION=${{ needs.release-gate.outputs.tag }}
+          tags: ${{ steps.agent_meta.outputs.tags }}
+          labels: ${{ steps.agent_meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+  github-release:
+    name: Publish GitHub release
+    needs: [build, container, release-gate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-gate.outputs.commit }}
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: fusen-net-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate third-party license inventory
+        shell: bash
+        run: |
+          cargo install cargo-license --version 0.6.1 --locked
+          cargo license --avoid-dev-deps --json \
+            | jq --sort-keys 'sort_by(.name, .version)' \
+            > dist/THIRD-PARTY-LICENSES.json
+
+      - name: Record published container digests
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+          SERVER_DIGEST: ${{ needs.container.outputs.server_digest }}
+          AGENT_DIGEST: ${{ needs.container.outputs.agent_digest }}
+        run: |
+          printf '%s\n' \
+            "ghcr.io/${GITHUB_REPOSITORY}/server:${RELEASE_TAG}@${SERVER_DIGEST}" \
+            "ghcr.io/${GITHUB_REPOSITORY}/agent:${RELEASE_TAG}@${AGENT_DIGEST}" \
+            > dist/CONTAINER-DIGESTS.txt
+
+      - name: Generate source SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/fusen-net.spdx.json
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: dist/*
+
+      - name: Write release qualification notice
+        shell: bash
+        env:
+          IS_STABLE: ${{ needs.release-gate.outputs.is_stable }}
+          RELEASE_CHANNEL: ${{ needs.release-gate.outputs.release_channel }}
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+        run: |
+          if [[ "$IS_STABLE" == true ]]; then
+            printf '%s\n' \
+              '## Release qualification' \
+              '' \
+              'All three privileged real-TUN platform gates passed on this tagged commit.' \
+              > release-qualification.md
+          else
+            printf '%s\n' \
+              '## Pre-release limitations' \
+              '' \
+              "This ${RELEASE_CHANNEL} build is an early preview. The privileged Linux, macOS, and Windows real-TUN gates are not required for prerelease publication and were skipped by this workflow. Native platform and transport-backend support is not yet stable; do not use this build for critical production traffic." \
+              '' \
+              'Implementation note: gm-quic 0.4 uses local Apache-2.0 qconnection and qunreliable patches for 1-RTT Datagram assembly, bounded 256-entry Datagram queues, and bounded reliable-frame dispatch. The backend remains preview-only until privileged real-TUN, hostile-input backpressure, and soak gates pass.' \
+              > release-qualification.md
+          fi
+
+          package_version="${RELEASE_TAG#v}"
+          awk -v prefix="## [${package_version}] - " '
+            index($0, prefix) == 1 { emit = 1 }
+            emit && /^## / && index($0, prefix) != 1 { exit }
+            emit { print }
+          ' CHANGELOG.md > release-changelog.md
+          test -s release-changelog.md
+
+          {
+            cat release-qualification.md
+            printf '\n## Changelog\n\n'
+            cat release-changelog.md
+          } > release-body.md
+
+      - name: Reconfirm the release tag has not moved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+          EXPECTED_COMMIT: ${{ needs.release-gate.outputs.commit }}
+        run: |
+          tag_ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}")"
+          test "$(jq -r '.object.type' <<<"$tag_ref")" = tag
+          tag_object="$(jq -r '.object.sha' <<<"$tag_ref")"
+          tag_payload="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object}")"
+          test "$(jq -r '.verification.verified' <<<"$tag_payload")" = true
+          test "$(jq -r '.object.type' <<<"$tag_payload")" = commit
+          current_commit="$(jq -r '.object.sha' <<<"$tag_payload")"
+          test "$current_commit" = "$EXPECTED_COMMIT" || {
+            echo "release tag moved after validation" >&2
+            exit 1
+          }
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ needs.release-gate.outputs.tag }}
+          body_path: release-body.md
+          generate_release_notes: true
+          prerelease: ${{ needs.release-gate.outputs.is_stable != 'true' }}
+          make_latest: ${{ needs.release-gate.outputs.is_stable == 'true' }}
+          fail_on_unmatched_files: true
+          files: dist/*
