@@ -1,29 +1,29 @@
 # Security Policy
 
-Fusen Net is networking software that handles authentication material and
+Stellaris is networking software that handles authentication material and
 untrusted packets. Please report suspected vulnerabilities privately, even
 when you are unsure whether the behavior is exploitable.
 
 ## Supported versions
 
-Until 0.1 reaches a stable release, security fixes are made only on `main` and
-the latest published 0.1 prerelease.
+Until 1.0 reaches a stable release, security fixes are made only on `main` and
+the latest published 0.3 prerelease.
 
 | Version | Security updates |
 | --- | --- |
-| `main` / latest `0.1.x` prerelease | Yes |
-| Older prereleases and `0.0.x` | No |
-| Legacy TCP branches or images | No |
+| `main` / latest `0.3.x` prerelease | Yes |
+| Older prereleases | No |
+| Legacy v1 protocol, configuration, branches, or images | No |
 
 Users of an unsupported version should first reproduce with the latest
 supported version when it is safe to do so. The support policy may change at
-the stable 0.1 release and will be recorded here and in the release notes.
+the stable 1.0 release and will be recorded here and in the release notes.
 
 ## Reporting a vulnerability
 
 Use GitHub Private Vulnerability Reporting:
 
-<https://github.com/kwsc98/fusen-net/security/advisories/new>
+<https://github.com/kwsc98/Stellaris/security/advisories/new>
 
 Do not open a public Issue, Discussion, or Pull Request for an undisclosed
 vulnerability. Do not include live private keys, tokens, packet captures with

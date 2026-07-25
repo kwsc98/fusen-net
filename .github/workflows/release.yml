@@ -15,6 +15,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  IMAGE_NAMESPACE: ghcr.io/kwsc98/stellaris
 
 jobs:
   validate:
@@ -79,9 +80,9 @@ jobs:
         run: |
           tag="$RELEASE_TAG"
           package_version="$({ cargo metadata --locked --no-deps --format-version 1; } \
-            | jq -r '.packages[] | select(.name == "fusen-net-cli") | .version')"
+            | jq -r '.packages[] | select(.name == "stellaris-cli") | .version')"
           test "v${package_version}" = "$tag" || {
-            echo "tag $tag does not match fusen-net-cli version $package_version" >&2
+            echo "tag $tag does not match stellaris-cli version $package_version" >&2
             exit 1
           }
 
@@ -116,11 +117,61 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+      - name: Check patch whitespace
+        shell: bash
+        run: git diff --check HEAD^ HEAD
+
+      - name: Check local Markdown links
+        shell: bash
+        run: |
+          ruby <<'RUBY'
+          require "pathname"
+          require "uri"
+
+          root = Pathname.pwd.expand_path
+          failures = []
+          markdown_files = `git ls-files -z -- '*.md'`.split("\0")
+          link_pattern = /!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))/
+
+          markdown_files.each do |source|
+            File.read(source).scan(link_pattern) do |bracketed, plain|
+              target = bracketed || plain
+              next if target.empty? || target.start_with?("#")
+              next if target.match?(/\A(?:[a-z][a-z0-9+.-]*:|\/\/)/i)
+
+              encoded_path = target.split("#", 2).first.split("?", 2).first
+              next if encoded_path.empty?
+
+              begin
+                relative_path = URI::DEFAULT_PARSER.unescape(encoded_path)
+              rescue URI::InvalidURIError
+                failures << "#{source}: invalid local link #{target.inspect}"
+                next
+              end
+
+              destination = Pathname.new(source).dirname.join(relative_path).expand_path
+              unless destination == root || destination.to_s.start_with?("#{root}#{File::SEPARATOR}")
+                failures << "#{source}: local link escapes the repository: #{target}"
+                next
+              end
+              failures << "#{source}: missing local link target #{target}" unless destination.exist?
+            end
+          end
+
+          abort failures.join("\n") unless failures.empty?
+          puts "validated local links in #{markdown_files.length} Markdown files"
+          RUBY
+
       - name: Run release Clippy gate
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: Run release tests
         run: cargo test --workspace --all-features --locked
+
+      - name: Run protocol decoder fuzz smoke
+        run: >-
+          cargo test -p stellaris --lib --locked
+          protocol::tests::arbitrary_input_is_handled_without_panicking -- --exact
 
       - name: Build release documentation
         env:
@@ -131,9 +182,9 @@ jobs:
         shell: bash
         run: |
           for feature in backend-quinn backend-s2n backend-gm-quic; do
-            cargo check -p fusen-net --all-targets --locked \
+            cargo check -p stellaris --all-targets --locked \
               --no-default-features --features "$feature"
-            cargo check -p fusen-net-cli --all-targets --locked \
+            cargo check -p stellaris-cli --all-targets --locked \
               --no-default-features --features "$feature"
           done
 
@@ -171,7 +222,7 @@ jobs:
     name: Stable gate / Linux real TUN
     needs: validate
     if: needs.validate.outputs.is_stable == 'true'
-    runs-on: [self-hosted, Linux, X64, fusen-net-tun]
+    runs-on: [self-hosted, Linux, X64, stellaris-tun]
     timeout-minutes: 180
     permissions:
       contents: read
@@ -187,52 +238,9 @@ jobs:
       - name: Run stable real TUN gate
         run: bash tests/e2e/run-real-tun.sh linux all
 
-  real-tun-macos:
-    name: Stable gate / macOS real TUN
-    needs: validate
-    if: needs.validate.outputs.is_stable == 'true'
-    runs-on: [self-hosted, macOS, X64, fusen-net-tun]
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.validate.outputs.commit }}
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: 1.97.0
-
-      - name: Run stable real TUN gate
-        env:
-          FUSEN_REAL_TUN_REQUIRE_FULL: 1
-        run: bash tests/e2e/run-real-tun.sh macos standard
-
-  real-tun-windows:
-    name: Stable gate / Windows real TUN
-    needs: validate
-    if: needs.validate.outputs.is_stable == 'true'
-    runs-on: [self-hosted, Windows, X64, fusen-net-tun]
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ needs.validate.outputs.commit }}
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: 1.97.0
-
-      - name: Run stable real TUN gate
-        shell: pwsh
-        run: ./tests/e2e/run-real-tun.ps1 -Scenario standard -RequireFullOverlay
-
   release-gate:
     name: Resolve release qualification
-    needs: [validate, policy, real-tun-linux, real-tun-macos, real-tun-windows]
+    needs: [validate, policy, real-tun-linux]
     if: always()
     runs-on: ubuntu-latest
     outputs:
@@ -245,8 +253,6 @@ jobs:
       VALIDATE_RESULT: ${{ needs.validate.result }}
       POLICY_RESULT: ${{ needs.policy.result }}
       LINUX_TUN_RESULT: ${{ needs.real-tun-linux.result }}
-      MACOS_TUN_RESULT: ${{ needs.real-tun-macos.result }}
-      WINDOWS_TUN_RESULT: ${{ needs.real-tun-windows.result }}
     steps:
       - name: Enforce release gates
         shell: bash
@@ -257,15 +263,13 @@ jobs:
           fi
 
           if [[ "$IS_STABLE" == true ]]; then
-            for result in "$LINUX_TUN_RESULT" "$MACOS_TUN_RESULT" "$WINDOWS_TUN_RESULT"; do
-              if [[ "$result" != success ]]; then
-                echo "all three real TUN jobs must pass before a stable release" >&2
-                exit 1
-              fi
-            done
-            echo "stable release qualified by all three real TUN jobs"
+            if [[ "$LINUX_TUN_RESULT" != success ]]; then
+              echo "the complete Linux v2 real-TUN gate must pass before a stable release" >&2
+              exit 1
+            fi
+            echo "stable release qualified by the Linux v2 real-TUN gate"
           else
-            echo "::warning::prerelease publication skips the stable real TUN gates"
+            echo "::warning::prerelease publication skips the stable Linux real-TUN gate"
           fi
 
   build:
@@ -298,35 +302,33 @@ jobs:
 
       - name: Build release binary
         run: >-
-          cargo build -p fusen-net-cli --bin fusen-net --release --locked
-          --target ${{ matrix.target }} --features all-backends
+          cargo build -p stellaris-cli --bin stellaris --release --locked
+          --target ${{ matrix.target }} --no-default-features --features backend-quinn
 
       - name: Package Unix binary
         if: runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p dist/package
-          cp "target/${{ matrix.target }}/release/fusen-net" dist/package/fusen-net
+          cp "target/${{ matrix.target }}/release/stellaris" dist/package/stellaris
           cp README.md LICENSE-APACHE LICENSE-MIT dist/package/
-          tar -C dist/package -czf "dist/fusen-net-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.tar.gz" .
+          tar -C dist/package -czf "dist/stellaris-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.tar.gz" .
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/package | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/fusen-net.exe" dist/package/
+          Copy-Item "target/${{ matrix.target }}/release/stellaris.exe" dist/package/
           Copy-Item "target/${{ matrix.target }}/release/wintun.dll" dist/package/
           Copy-Item README.md, LICENSE-APACHE, LICENSE-MIT dist/package/
-          & dist/package/fusen-net.exe --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Compress-Archive -Path dist/package/* -DestinationPath "dist/fusen-net-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.zip"
+          Compress-Archive -Path dist/package/* -DestinationPath "dist/stellaris-${{ needs.release-gate.outputs.tag }}-${{ matrix.target }}.zip"
 
       - name: Upload package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: fusen-net-${{ matrix.target }}
-          path: dist/fusen-net-*
+          name: stellaris-${{ matrix.target }}
+          path: dist/stellaris-*
           if-no-files-found: error
 
   container:
@@ -359,7 +361,7 @@ jobs:
         id: server_meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          images: ghcr.io/${{ github.repository }}/server
+          images: ${{ env.IMAGE_NAMESPACE }}/server
           tags: |
             type=raw,value=${{ needs.release-gate.outputs.tag }}
 
@@ -381,7 +383,7 @@ jobs:
         id: agent_meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          images: ghcr.io/${{ github.repository }}/agent
+          images: ${{ env.IMAGE_NAMESPACE }}/agent
           tags: |
             type=raw,value=${{ needs.release-gate.outputs.tag }}
 
@@ -418,7 +420,7 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: fusen-net-*
+          pattern: stellaris-*
           path: dist
           merge-multiple: true
 
@@ -438,8 +440,8 @@ jobs:
           AGENT_DIGEST: ${{ needs.container.outputs.agent_digest }}
         run: |
           printf '%s\n' \
-            "ghcr.io/${GITHUB_REPOSITORY}/server:${RELEASE_TAG}@${SERVER_DIGEST}" \
-            "ghcr.io/${GITHUB_REPOSITORY}/agent:${RELEASE_TAG}@${AGENT_DIGEST}" \
+            "${IMAGE_NAMESPACE}/server:${RELEASE_TAG}@${SERVER_DIGEST}" \
+            "${IMAGE_NAMESPACE}/agent:${RELEASE_TAG}@${AGENT_DIGEST}" \
             > dist/CONTAINER-DIGESTS.txt
 
       - name: Generate source SBOM
@@ -447,7 +449,7 @@ jobs:
         with:
           path: .
           format: spdx-json
-          output-file: dist/fusen-net.spdx.json
+          output-file: dist/stellaris.spdx.json
 
       - name: Generate SHA-256 checksums
         shell: bash
@@ -473,15 +475,16 @@ jobs:
             printf '%s\n' \
               '## Release qualification' \
               '' \
-              'All three privileged real-TUN platform gates passed on this tagged commit.' \
+              'The privileged Linux Quinn v2 real-TUN gate passed on this tagged commit. macOS and Windows artifacts are compile-only and have not passed a real-TUN release gate.' \
+              'The s2n-quic and gm-quic transport features are compile-checked only and are not qualified v2 runtime backends.' \
               > release-qualification.md
           else
             printf '%s\n' \
               '## Pre-release limitations' \
               '' \
-              "This ${RELEASE_CHANNEL} build is an early preview. The privileged Linux, macOS, and Windows real-TUN gates are not required for prerelease publication and were skipped by this workflow. Native platform and transport-backend support is not yet stable; do not use this build for critical production traffic." \
+              "This ${RELEASE_CHANNEL} build is an early preview. The privileged Linux Quinn v2 real-TUN gate is not required for prerelease publication and was skipped by this workflow. macOS and Windows artifacts are compile-only and have not passed a real-TUN release gate. Do not use this build for critical production traffic." \
               '' \
-              'Implementation note: gm-quic 0.4 uses local Apache-2.0 qconnection and qunreliable patches for 1-RTT Datagram assembly, bounded 256-entry Datagram queues, and bounded reliable-frame dispatch. The backend remains preview-only until privileged real-TUN, hostile-input backpressure, and soak gates pass.' \
+              'The s2n-quic and gm-quic transport features are compile-checked only and are not qualified v2 runtime backends. The v2 runtime and real-TUN gate use Quinn.' \
               > release-qualification.md
           fi
 

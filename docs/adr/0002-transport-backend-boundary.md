@@ -1,27 +1,22 @@
-# ADR 0002：QUIC 后端边界
+# ADR 0002：QUIC 传输抽象边界
 
-- 状态：Accepted
+- 状态：Superseded for runtime selection by [ADR 0003](0003-coordinator-p2p-relay-fallback.md)
 - 日期：2026-07-20
 
 ## 背景
 
-项目需要比较和支持 Quinn、s2n-quic、gm-quic。虽然它们实现 QUIC，具体 API、
-Datagram 能力、关闭语义和扩展行为不同。把跨库直接互操作当成默认承诺会显著扩大
-测试矩阵并掩盖实现差异。
+Quinn、s2n-quic 和 gm-quic 的 API、Datagram buffer 和关闭语义不同。核心网络逻辑
+需要可测试的抽象边界，但“依赖存在”与“可由当前运行时选择”是不同承诺。
 
-## 决策
+## 当前决策
 
-每条 Agent-Relay 链路必须在配置中选择相同后端。Relay 可以同时创建多个不同后端
-listener，连接建立后都适配到对象安全的 `Connection` 接口，并共享同一个控制面、
-路由表和数据面。
-
-Quinn 是参考实现；核心库默认启用 `backend-quinn`。s2n-quic 和 gm-quic 分别由
-独立 feature 启用，正式 CLI 使用 `all-backends`。三个后端必须通过相同的 TLS、
-ALPN、控制流、Datagram、关闭、超时和错误契约测试。
+- 保留对象安全的 endpoint/connection 抽象，以及三个独立 Cargo feature 的编译检查。
+- Stellaris v2 Server、Agent、Relay 和 P2P 运行时固定使用 Quinn。
+- schema v2 不含 backend 字段，三个 Server UDP listener 表示协议用途而非传输实现。
+- s2n-quic 和 gm-quic 的 v2 endpoint 请求显式返回不支持，不能隐式回退或降级。
 
 ## 后果
 
-- Relay 可以在源、目标使用不同后端时转发包，而不要求两个 Edge 直接互操作。
-- 每个后端故障被限制在 transport 适配层，协议和路由测试可以使用 fake transport。
-- 稳定版仍被三个后端共同阻塞；任一契约测试失败都不能将该后端标为支持。
-- 未来若承诺跨库直连兼容，需要新的 ADR 和明确的互操作测试矩阵。
+传输抽象仍帮助单元测试和未来评估，但 `all-backends` 只表示编译覆盖，不表示运行时
+可切换或稳定支持。若未来增加其他 v2 QUIC 实现，必须有新的 ADR、协议互操作边界和
+独立真实网络门禁。

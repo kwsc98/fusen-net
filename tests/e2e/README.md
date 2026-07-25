@@ -1,30 +1,60 @@
-# Real TUN end-to-end tests
+# Linux real-TUN end-to-end gates
 
-The workflow in `.github/workflows/tun-e2e.yml` is a manual release gate for isolated, disposable self-hosted runners. Hosted GitHub runners do not provide the privileges needed to validate native TUN setup and route rollback.
+`.github/workflows/tun-e2e.yml` is a manual gate for an isolated, disposable
+self-hosted Linux x86_64 runner. Hosted runners do not provide the privileges
+needed for native TUN, routes, network namespaces, or fault injection.
 
-Runner labels:
+Required labels are `self-hosted`, `Linux`, `X64`, `stellaris-tun`. Run the
+test process as root. The host needs `/dev/net/tun`, `iproute2`, and `ping`;
+the complete gate also needs `tc`. Do not attach a persistent organization-wide
+runner because repository code executes with network-administration rights.
 
-| Platform | Required labels |
-| --- | --- |
-| Linux x86_64 | `self-hosted`, `Linux`, `X64`, `fusen-net-tun` |
-| macOS x86_64 | `self-hosted`, `macOS`, `X64`, `fusen-net-tun` |
-| Windows x86_64 | `self-hosted`, `Windows`, `X64`, `fusen-net-tun` |
+## Current executable coverage
 
-Each runner must be disposable, run the test process as root/Administrator, and have outbound loopback/UDP networking. Linux requires `/dev/net/tun`, `iproute2`, `iputils ping`, and network-namespace support; fault scenarios additionally require `tc` with netem and u32 classifiers. Windows requires a provisioned Wintun driver. Do not attach an organization-wide persistent runner to this workflow because repository code executes with network-administration rights.
+The privileged harness is `crates/stellaris/tests/real_tun.rs`, exposed as the
+ignored Cargo target `real_tun`.
 
-The executable contract is `crates/fusen-net/tests/real_tun.rs`, exposed as the ignored Cargo integration target `real_tun`. All platforms run `native_tun_protocol_and_route_lifecycle`: it creates the native adapter, installs the exact overlay route, sends real kernel ping/UDP/TCP traffic through the device to a packet-level responder, and verifies route plus interface removal within five seconds. A failure to create the device, run a system command, exchange a packet, or clean up a created resource fails the test.
+The implemented `native_tun_protocol_and_route_lifecycle` smoke creates the
+real Linux adapter, installs the overlay route, passes kernel ICMP/UDP/TCP to a
+packet-level responder, and verifies route/interface cleanup. It does **not**
+exercise enrollment, QUIC, Relay, P2P, Server restart, or two Agent runtimes.
 
-One host network stack cannot run two production Edge instances honestly: both would install the same overlay CIDR, and both assigned addresses would be local to that stack. Linux therefore runs Edge A and Edge B in separate network namespaces and starts the real Relay/runtime over veth underlay links. The `standard` scenario verifies 100 lossless pings, UDP/TCP echo, all three matching QUIC backends, Relay restart recovery within 30 seconds, and graceful route rollback. macOS and Windows run the platform lifecycle test on one disposable runner; complete cross-host Relay/Edge qualification on those systems still requires a two-VM or two-runner controller and remains a stable-release blocker.
-
-Linux has explicit `fault` and `soak` entries for all three backends. `fault` proves that netem caused nonzero loss and out-of-order delivery, then applies a size-selective silent-drop classifier, proves small packets still pass, proves a large packet is black-holed, removes the classifier, and proves recovery. `soak` defaults to 1800 seconds and continuously opens UDP/TCP exchanges before a final ping gate. It snapshots RSS, open descriptors, and thread counts for the Relay and both Edges after warm-up and fails on sustained growth beyond the documented test tolerances. `FUSEN_REAL_TUN_SOAK_SECONDS` may shorten development runs, but release evidence must use the default.
-
-Run a platform and scenario from the Actions page, or locally on a disposable privileged host:
+Run it with:
 
 ```bash
-sudo tests/e2e/run-real-tun.sh linux standard
-sudo tests/e2e/run-real-tun.sh linux fault
-sudo tests/e2e/run-real-tun.sh linux soak
-sudo tests/e2e/run-real-tun.sh macos standard
+sudo tests/e2e/run-real-tun.sh linux native
 ```
 
-The scripts always use `Cargo.lock`, build all backend features, and select ignored tests by exact name. Development runs can narrow `standard`, `fault`, or `soak` with `FUSEN_REAL_TUN_BACKENDS`, `FUSEN_REAL_TUN_FAULT_BACKENDS`, or `FUSEN_REAL_TUN_SOAK_BACKENDS` respectively; release evidence must leave all three unset so each scenario retains `quinn s2n gm-quic`.
+The script uses `Cargo.lock`, builds all features for compile coverage, selects
+the ignored test by exact name, and fails if the expected test does not exist.
+
+## Required complete gate
+
+```bash
+sudo tests/e2e/run-real-tun.sh linux all
+```
+
+In addition to the native lifecycle smoke, `all` requires these exact tests:
+
+| Test | Required behavior |
+| --- | --- |
+| `linux_v2_overlay_e2e` | two namespace-isolated Agents complete enrollment/control/Relay/P2P and exchange ping/TCP/UDP |
+| `linux_v2_server_restart` | Server restart forces reauthentication without losing durable identity/state |
+| `linux_v2_agent_restart` | Agent restart reuses identity, restores TUN/route, and does not reuse its token |
+| `linux_v2_fault_injection` | loss, reordering, MTU black hole, P2P failure and Relay recovery |
+| `linux_v2_soak` | at least 30 minutes of connection churn with bounded RSS/tasks/threads/fds/queues |
+
+These complete tests are not all implemented in the current tree. The runner
+therefore fails closed instead of treating a missing scenario as skipped. This
+README and the workflow are a specification of the release gate, not evidence
+that it passed.
+
+The full scenarios must also record packet IDs across Relay/P2P transitions to
+prove that Stellaris does not actively duplicate a packet, create a loop, or
+resend a failed P2P packet through Relay. Session replacement, certificate
+renewal/expiry, source spoofing, Ready gating, queue pressure, and route
+rollback are required assertions.
+
+macOS and Windows are compile-only/unverified for this release line. The shell
+runner rejects them; future native support needs separate real multi-host or
+multi-VM gates rather than extrapolating from Linux results.

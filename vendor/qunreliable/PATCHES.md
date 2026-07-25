@@ -1,4 +1,4 @@
-# Fusen Net qunreliable fork
+# Stellaris qunreliable fork
 
 This directory contains a minimally patched copy of `qunreliable` 0.4.0 from
 crates.io.
@@ -33,7 +33,7 @@ dropped explicitly so it cannot permanently block the queue head.
 
 Focused boundary tests in `src/writer.rs` and `src/reader.rs` cover the exact
 capacity, overflow behavior, recovery after one entry is drained, and lock
-poison recovery. Fusen Net maps `WouldBlock` to `DatagramQueueFull` and an
+poison recovery. Stellaris maps `WouldBlock` to `DatagramQueueFull` and an
 oversized `InvalidInput` error to `DatagramTooLarge`.
 
 This fork must be removed when an upstream release provides equivalent

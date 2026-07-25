@@ -1,10 +1,23 @@
-version = 1
+version = 2
 
 [agent]
 node_id = "edge-a"
-server_addr = "127.0.0.1:7000"
-backend = "quinn"
+tun_name = "stellaris0"
+
+[coordinator]
+enrollment_addr = "127.0.0.1:7000"
+control_addr = "127.0.0.1:7001"
+relay_addr = "127.0.0.1:7002"
 server_name = "localhost"
-ca_file = "certs/ca.pem"
-token_file = "secrets/edge-a.token"
-tun_name = "fusen0"
+deployment_ca_file = "certs/deployment-ca.pem"
+
+[identity]
+directory = "state/edge-a"
+enrollment_token_file = "secrets/edge-a.token"
+
+[p2p]
+bind = "0.0.0.0:7100"
+idle_timeout_secs = 300
+
+# [observability]
+# metrics_bind = "127.0.0.1:9101"

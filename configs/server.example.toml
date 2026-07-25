@@ -1,23 +1,32 @@
-version = 1
+version = 2
 
-[server]
+[network]
 overlay_cidr = "10.88.0.0/24"
 mtu = 1100
+
+[registry]
 nodes_file = "nodes.example.toml"
+
+[storage]
+coordinator_state_file = "state/coordinator-state.json"
 
 [tls]
 server_name = "localhost"
-cert_file = "certs/server.pem"
-key_file = "certs/server-key.pem"
+service_cert_file = "certs/deployment-server.pem"
+service_key_file = "certs/deployment-server-key.pem"
+node_ca_cert_file = "state/node-ca.pem"
+node_ca_key_file = "state/node-ca-key.pem"
 
-[[listeners]]
-backend = "quinn"
-bind = "0.0.0.0:7000"
+[listeners]
+enrollment = "0.0.0.0:7000"
+control = "0.0.0.0:7001"
+relay = "0.0.0.0:7002"
 
-[[listeners]]
-backend = "s2n"
-bind = "0.0.0.0:7001"
+[limits]
+max_nodes = 256
+max_connections_per_ip = 8
+max_pending_handshakes = 64
+queue_capacity = 256
 
-[[listeners]]
-backend = "gm-quic"
-bind = "0.0.0.0:7002"
+# [observability]
+# metrics_bind = "127.0.0.1:9100"

@@ -15,30 +15,32 @@ COPY apps ./apps
 COPY vendor ./vendor
 
 RUN cargo build \
-    --package fusen-net-cli \
-    --bin fusen-net \
+    --package stellaris-cli \
+    --bin stellaris \
     --release \
     --locked \
-    --features all-backends
+    --no-default-features \
+    --features backend-quinn
 
 FROM debian:bookworm-slim AS runtime
 
 ARG VERSION=dev
-LABEL org.opencontainers.image.title="Fusen Net agent" \
-      org.opencontainers.image.description="TUN edge agent for Fusen Net" \
-      org.opencontainers.image.source="https://github.com/kwsc98/fusen-net" \
+LABEL org.opencontainers.image.title="Stellaris agent" \
+      org.opencontainers.image.description="TUN overlay agent for Stellaris" \
+      org.opencontainers.image.source="https://github.com/kwsc98/Stellaris" \
       org.opencontainers.image.licenses="Apache-2.0 OR MIT" \
       org.opencontainers.image.version="${VERSION}"
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates iproute2 \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/fusen-net /run/fusen-net
+    && mkdir -p /etc/stellaris /var/lib/stellaris \
+    && chmod 0700 /var/lib/stellaris
 
-COPY --from=builder /src/target/release/fusen-net /usr/local/bin/fusen-net
+COPY --from=builder /src/target/release/stellaris /usr/local/bin/stellaris
 
 ENV RUST_LOG=info
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/usr/local/bin/fusen-net"]
-CMD ["agent", "--config", "/etc/fusen-net/agent.toml"]
+ENTRYPOINT ["/usr/local/bin/stellaris"]
+CMD ["agent", "run", "--config", "/etc/stellaris/agent.toml"]

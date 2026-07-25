@@ -1,115 +1,112 @@
 # 发布流程
 
-只有维护者可以发布。版本遵循 SemVer，变更记录遵循 Keep a Changelog。核心
-`fusen-net` crate 在 API 稳定前保持 `publish = false`；0.1 只发布 CLI 二进制、
+只有维护者可以发布。版本遵循 SemVer；`0.x` 可以包含破坏式协议、配置和状态变化。
+核心 `stellaris` crate 在 API 稳定前保持 `publish = false`，发布物是 CLI 二进制、
 Linux 容器和源代码。
 
-## 发布前
+当前 workspace 版本为 `0.3.0-alpha.1`。它是早期预览，不得在 Release Notes、镜像
+说明或支持矩阵中标记为稳定生产版本。
 
-1. 从 `main` 的干净 commit 发布，确认所有计划变更已经评审合并。
-2. 将 workspace 版本更新为目标版本，所有 package 保持一致。
-3. 将 `CHANGELOG.md` 的 `Unreleased` 内容移入带日期的版本标题，补充迁移、
-   安全和已知限制。
-4. 确认 README、配置示例、协议版本和支持矩阵与实现一致。
-5. 确认 `Cargo.lock` 没有意外变化，新增依赖有许可证和来源说明。
+## 发布前一致性
 
-本地运行无特权门禁：
+1. 从 `main` 的干净、已评审 commit 发布。
+2. workspace 中所有 package 使用同一版本，tag 与 Cargo 版本完全一致。
+3. `CHANGELOG.md` 记录破坏式切换、无迁移路径、安全边界和已知限制。
+4. README、schema v2 示例、四条 ALPN、CLI 命令和支持矩阵与实现一致。
+5. `Cargo.lock` 无意外变化；新增依赖有许可证和来源说明。
+6. 搜索并拒绝旧命令、旧 schema/ALPN、backend 配置和历史项目名的当前能力声明。
+7. 检查 Markdown 本地链接并运行 `git diff --check`。
+
+文档必须区分“实现存在”和“门禁已通过”。仓库中有 ignored test、workflow 或脚本
+不是执行成功的证据；只有目标 tag commit 对应的可审计 CI/runner 结果才算门禁证据。
+
+## 无特权门禁
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
-cargo test --manifest-path vendor/qunreliable/Cargo.toml --locked
-cargo test --manifest-path vendor/qconnection/Cargo.toml --locked
-cargo clippy --manifest-path vendor/qunreliable/Cargo.toml --all-targets --locked -- -D warnings
-cargo clippy --manifest-path vendor/qconnection/Cargo.toml --all-targets --locked -- -D warnings
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
+RUSTDOCFLAGS="-D warnings" \
+  cargo doc --workspace --all-features --no-deps --locked
+cargo check -p stellaris --all-targets --locked \
+  --no-default-features --features backend-quinn
+cargo check -p stellaris --all-targets --locked \
+  --no-default-features --features backend-s2n
+cargo check -p stellaris --all-targets --locked \
+  --no-default-features --features backend-gm-quic
 cargo deny check
 cargo audit
+git diff --check
 ```
 
-随后等待托管 CI 的 Linux/macOS/Windows 编译、三个单后端 feature 构建和依赖检查
-通过。无预发布后缀的稳定标签还必须通过三个一次性自托管 runner 上的真实 TUN
-E2E：ping、TCP、UDP、重连和路由回滚；Linux 另需让 Quinn、s2n 和 gm-quic 分别
-通过丢包、乱序、MTU 黑洞和 30 分钟 soak。
+还要执行 vendored `qconnection`/`qunreliable` 的 fmt、Clippy 和测试，并在 Linux、
+macOS、Windows 目标编译 CLI。s2n-quic 和 gm-quic feature 只证明保留的抽象可编译，
+不能在 Release Notes 中描述成 v2 可选运行后端；v2 runtime 固定使用 Quinn。
 
-仓库提供 ignored 的 `crates/fusen-net/tests/real_tun.rs` 特权 harness 和显式场景脚本。
-三平台可以在单机上验证真实 TUN 创建、内核 ping/TCP/UDP 和路由回滚；Linux 通过两个
-network namespace 进一步验证完整 Relay/Edge、三后端、重连、故障注入和 soak。
-macOS/Windows 的完整双 Edge 数据面仍需双 VM 或双 runner 控制器，且一次性 runner
-证据尚未纳入自动发布工作流。因此当前仍只能发布 alpha/beta/rc；这些门禁和 runner
-全部就绪前，不能以手工上传制品绕过稳定发布条件。
+协议/身份测试至少覆盖四 ALPN 隔离、严格 JSON/方向、enrollment 一次性消费、CSR
+PoP、SPKI 轮换、续期、撤销、session/incarnation 重放、Relay Ready 和 P2P descriptor
+验证。CI 会对严格解码器执行固定种子的 4096 输入 fuzz smoke；长时间、覆盖率引导的
+持续 fuzz 仍是后续门禁，不能用 smoke 结果代替。
 
-`gm-quic 0.4` 依赖仓库内 Apache-2.0 的 `qconnection` 和 `qunreliable` 最小 fork，
-分别补齐 1-RTT Datagram 组包和收发各 256 项的队列。发布评审必须检查
-`vendor/*/PATCHES.md`、第三方许可证、SBOM 和相对上游 0.4.0 的 diff。只有统一后端
-契约、真实 TUN 背压及长时间资源测试通过后才能标为稳定支持；升级上游版本时不得在
-没有等价测试证据的情况下移除或静默绕过本地 patch。本地 `qconnection` fork 已将
-ACK、CRYPTO、stream 和连接控制帧分发限制为每类 256 项，并在可靠帧队列满时关闭
-连接。稳定评审仍必须用资源监控下的恶意输入和 soak 证明不会持续增长资源。
+## Linux 特权门禁
 
-发布评审不得把三个后端描述为统一的 256 项队列：s2n 和 vendored gm-quic 的
-Datagram 收发队列分别为 256 项，而 Quinn 的收发缓冲分别是 128 KiB 字节预算，
-其等效包数随 Datagram 长度变化。Relay 每个目标会话的应用层队列才固定为 256 项。
+首轮运行支持只以 Linux 为门禁。使用隔离、一次性 self-hosted runner，具备 root、
+`/dev/net/tun`、`ip`、`ping`，完整场景还需要 `tc`：
+
+```bash
+sudo tests/e2e/run-real-tun.sh linux native
+sudo tests/e2e/run-real-tun.sh linux all
+```
+
+`native` 当前只验证本机 TUN/route 及内核 ping/TCP/UDP 生命周期，不经过完整 Stellaris
+网络。`all` 必须额外存在并通过以下 exact tests：
+
+- `linux_v2_overlay_e2e`
+- `linux_v2_server_restart`
+- `linux_v2_agent_restart`
+- `linux_v2_fault_injection`
+- `linux_v2_soak`
+
+当前这些完整测试尚未全部实现，脚本会 fail-closed。因此 `0.3.0-alpha.1` 没有完整
+Linux 真实网络门禁通过声明。实现完成后，soak 必须至少运行 30 分钟并监控 RSS、
+任务、线程、文件描述符、queue 和路径类型。
+
+macOS/Windows 当前只要求编译成功，原生 TUN/P2P 未验证。未来若提升其支持等级，
+必须新增各自真实双 Agent/多主机门禁，不能沿用 Linux 结果推断。
 
 ## 候选版验收
 
-- 三后端连接、TLS/SNI/ALPN、控制流、Datagram、关闭、超时和错误契约全部通过。
-- 背压测试分别覆盖应用层 256 项队列、s2n/gm-quic 的 256 项队列和 Quinn 的
-  128 KiB 字节预算边界。
-- 多 listener 3 x 3 源/目标后端路由组合全部通过。
-- 100 次正常条件 ping 零丢包。
-- Relay 重启后 Agent 在 30 秒内恢复。
-- Agent 退出后 5 秒内清理程序创建的接口和路由。
-- 长时间测试没有持续内存/任务/文件描述符增长。
+在描述 alpha 为“可运行预览”前，至少需要：
 
-任一目标平台或后端失败都阻塞稳定版。alpha/beta/rc 可以携带明确已知限制，但不能
-在 Release Notes 中标为稳定支持，也不能把未通过的原生平台或后端列为稳定能力。
+- enrollment -> control -> Relay -> TUN 双 Agent 双向 IPv4；
+- Ready 前丢弃、源地址伪造、MTU、背压、重连和 session ABA；
+- 两节点/多节点 LAN P2P、同时拨号仲裁和 Relay/P2P 切换；
+- 包 ID 证明无主动重复包、无环路，P2P 失败包不补发；
+- 证书续期替代、到期关闭、token/SPKI 轮换和撤销；
+- Server/Agent 重启、持久化故障点和路由回滚；
+- Linux `all` 与 30 分钟 soak 完整通过。
 
-## 标签和自动发布
+任一项缺少证据时必须在 Release Notes 顶部列为已知限制。预发布可以在普通 CI 通过
+后发布用于开发评估，但不能暗示跳过的特权门禁成功。
 
-创建与 Cargo 版本完全一致的签名标签。工作流接受 `vX.Y.Z` 稳定标签，以及
-`vX.Y.Z-alpha[.N]`、`vX.Y.Z-beta[.N]`、`vX.Y.Z-rc[.N]` 预发布标签：
+## 标签与制品
+
+创建与 Cargo 版本一致的 signed annotated tag：
 
 ```bash
-git tag -s v0.1.0-rc.1 -m "Fusen Net 0.1.0-rc.1"
-git push origin v0.1.0-rc.1
-
-git tag -s v0.1.0 -m "Fusen Net 0.1.0"
-git push origin v0.1.0
+git tag -s v0.3.0-alpha.1 -m "Stellaris 0.3.0-alpha.1"
+git push origin v0.3.0-alpha.1
 ```
 
-`v*` 标签触发 GitHub Release workflow。工作流通过 GitHub API 验证 annotated tag
-的签名状态，并确认标签 commit 可从 `origin/main` 到达；随后从该 commit 重建，而不是
-上传本地二进制。稳定标签在构建和发布制品前会直接调用三个真实 TUN 脚本，只有
-Linux、macOS 和 Windows job 全部成功才继续。预发布标签不会占用自托管 runner，
-可在普通门禁通过后继续，但 GitHub Release 会自动标为 prerelease，并在发布说明
-顶部声明真实 TUN 门禁未执行及平台支持尚未稳定。
+自动发布必须验证 tag 签名、确认 commit 可从 `origin/main` 到达，并从该 commit
+重建。第三方 Actions 固定完整 commit SHA。预发布标记为 prerelease；不得移动 tag
+或静默替换同一 tag 下的二进制。
 
-全部第三方 GitHub Actions 必须固定到完整 commit SHA，并在行尾保留可读版本注释；
-只通过 Dependabot 或经过评审的维护 PR 更新，不直接使用 `main`、`master` 或浮动
-major tag。标签验证后，所有后续 job checkout 已验证的 commit SHA，并在创建 Release
-前再次确认签名标签仍指向同一 commit，避免可移动标签造成构建竞态。
+目标制品包括 Linux/macOS/Windows x86_64 archive、`SHA256SUMS`、SPDX SBOM、第三方
+许可证清单、build provenance，以及 Server/Agent Linux amd64 镜像。平台 archive
+存在只表示构建产物，不表示原生运行支持。容器和自动化部署固定完整 tag 或 digest，
+不使用 `latest`。
 
-通过门禁后，工作流生成：
-
-- Linux x86_64、macOS x86_64 的 `.tar.gz` 和 Windows x86_64 的 `.zip`；
-- `SHA256SUMS`；
-- SPDX JSON SBOM 和第三方许可证清单；
-- GitHub build provenance attestation；
-- `ghcr.io/kwsc98/fusen-net/server:<tag>` 和
-  `ghcr.io/kwsc98/fusen-net/agent:<tag>` Linux amd64 镜像及 digest、SBOM、
-  provenance。
-
-发布页应复制对应 changelog，说明协议/配置版本、支持矩阵、升级步骤和已知问题。
-自动化部署固定完整版本或镜像 digest，不使用 `latest`。
-
-## 发布后
-
-1. 下载每种制品，验证 checksum、attestation 和 `fusen-net --version`。
-2. 使用发布镜像完成一个 Relay + 两个 Fake/真实 Edge 的 smoke test。
-3. 检查文档链接和容器命令，并在路线图中更新当前阶段。
-4. 观察安全告警和用户回报；修复进入新的 patch 版本，不移动既有标签。
-
-制品有安全或完整性问题时，立即停止推荐该版本、在 GitHub Release 添加醒目说明，
-撤回可变容器引用并发布修复版本。不得静默替换同一标签下的二进制或镜像。
+发布后下载制品验证 checksum、attestation 和 `stellaris --version`，再用发布制品
+重复所有声明通过的 smoke。发现安全或完整性问题时停止推荐并发布新版本，不修改
+既有不可变制品。

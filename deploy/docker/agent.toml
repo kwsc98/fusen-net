@@ -1,0 +1,20 @@
+version = 2
+
+[agent]
+node_id = "edge-a"
+tun_name = "stellaris0"
+
+[coordinator]
+enrollment_addr = "172.30.0.10:7000"
+control_addr = "172.30.0.10:7001"
+relay_addr = "172.30.0.10:7002"
+server_name = "server"
+deployment_ca_file = "/run/secrets/agent_ca"
+
+[identity]
+directory = "/var/lib/stellaris/identity"
+enrollment_token_file = "/run/secrets/agent_token"
+
+[p2p]
+bind = "0.0.0.0:7100"
+idle_timeout_secs = 300

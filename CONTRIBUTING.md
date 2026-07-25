@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你参与 Fusen Net。提交代码前请阅读
+感谢你参与 Stellaris。提交代码前请阅读
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) 和本指南。安全漏洞不要提交公开
 Issue，请使用 [`SECURITY.md`](SECURITY.md) 中的私密渠道。
 
@@ -11,8 +11,8 @@ Issue，请使用 [`SECURITY.md`](SECURITY.md) 中的私密渠道。
 - macOS/Windows 的真实 TUN 测试需要管理员权限；普通单元测试不应要求提权。
 
 ```bash
-git clone https://github.com/kwsc98/fusen-net.git
-cd fusen-net
+git clone https://github.com/kwsc98/Stellaris.git
+cd stellaris
 cargo build --workspace --all-features --locked
 ```
 

@@ -1,46 +1,49 @@
 # 更新日志
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 和
-[语义化版本](https://semver.org/lang/zh-CN/)。`0.x` 期间仍可能发生不兼容变更，
-具体兼容承诺见 [`docs/compatibility.md`](docs/compatibility.md)。
+[语义化版本](https://semver.org/lang/zh-CN/)。`0.x` 期间允许破坏式变更。
 
 ## [Unreleased]
 
-## [0.1.0-alpha.1] - 2026-07-20
+## [0.3.0-alpha.1] - 2026-07-25
 
 ### Added
 
-- 统一的 `fusen-net server|agent|config|token` 命令入口。
-- 版本化配置、静态节点注册表及 QUIC/TUN v1 协议边界。
-- 开源治理、安全、架构、部署和发布文档。
-- 三后端 3 x 3 Relay 路由、Relay 重启恢复和路由安装清理竞态测试。
-- 三平台真实 TUN 生命周期 harness，以及 Linux 双 namespace 的故障注入、三后端
-  30 分钟 soak 和进程资源增长门禁。
+- 新增 Quinn 驱动的协调服务、可信 Relay 与按需局域网 P2P 运行时。
+- 新增独立 enrollment、control、relay、P2P ALPN 和严格的版本 2 帧协议。
+- 新增显式 `stellaris server init`，持久化节点 CA 与协调状态；普通启动只加载且
+  校验现有状态。
+- 新增一次性 enrollment token、CSR PoP、24 小时节点 mTLS 证书、续期和授权 SPKI
+  持久化。
+- 新增同 socket 监听与拨号的 Quinn Hybrid endpoint、完整候选目录、重复连接仲裁、
+  Relay/P2P 原子路径选择、断线回退及五分钟空闲回收。
+- 新增有界控制、Relay 和 P2P 队列、会话/注册限流、运行指标以及事务式协调状态和
+  Agent 身份存储。
+- 新增有界的 Prometheus HTTP `/metrics` 端点；仅在配置 `observability.metrics_bind`
+  时监听。
 
 ### Changed
 
-- 项目主线从旧 TCP 端口代理切换为中心 Relay 转发的 IPv4 overlay。
-- 源码重组为核心库和 CLI 应用，应用构建提交 `Cargo.lock`。
-- 许可证改为 `Apache-2.0 OR MIT`。
-- 通过 Apache-2.0 本地 fork 补齐 gm-quic 0.4 的 1-RTT Datagram 组包，并将完整
-  Datagram 路径的收发队列固定为 256；队列满时拒绝或丢弃新 Datagram。
-- Rust 基线更新为 1.97.0；v1 overlay MTU 固定为 576..=1100。
-- `NodeRuntime` 改为可组合的监听、拨号、转发和 TUN 能力模型，并增加独立的
-  `control` 与 `data_plane` 模块边界。
-- Edge 注册握手统一使用 10 秒超时；路由安装不再因退出取消而丢失清理凭证。
-- Windows 配置检查会拒绝授权给所有者、Administrators 和 SYSTEM 之外主体的
-  token 或私钥 ACL。
-- Windows token 生成器会在写入秘密前建立受保护 ACL；Agent 从可执行文件目录
-  加载并验签 Release 附带的 `wintun.dll`。
-- TUN 适配按 Linux、macOS、Windows 拆分；发布工作流固定第三方 Action 和已验证
-  tag commit，并校验版本化 changelog。
+- 项目、crate、CLI、镜像和部署路径统一命名为 Stellaris，仓库地址为
+  `https://github.com/kwsc98/Stellaris`。
+- CLI 固定为 `server init|run`、`agent run`、`config check` 和 `token generate`；
+  运行时只接受 `--config` 或 `STELLARIS_CONFIG`。
+- Server 与 Agent 配置以及静态节点表统一使用严格 schema 版本 2。
+- 分布式运行时只使用 Quinn；s2n-quic 和 gm-quic 继续参与传输抽象编译检查，但
+  不能由运行配置选择。
+- 首轮正式运行门禁限定 Linux；macOS 和 Windows 当前只要求编译通过。
 
 ### Removed
 
-- 旧 TCP 端口映射 CLI、配置和线协议兼容性。
-- 仓库内硬编码的公网地址、示例证书和私钥。
+- 删除旧线协议、旧配置、旧运行时、地址租约分配器、后端 CLI 选择和所有兼容适配。
+- 不提供状态迁移器、配置迁移器、双栈 listener、协议降级或混合集群模式。
+- NAT 穿透、server-reflexive candidates、外部 STUN、HA、ACL、IPv6、动态地址和
+  管理 API 不进入本版本。
 
-## 历史快照
+### Security
 
-0.1 之前的代码是未发布、未打标签的实验快照，不构成版本兼容基线。旧 TCP 主线
-将在正式迁移时保留为 `legacy-tcp-v4` 标签。
+- 注册端点使用部署服务 TLS；control/relay 使用节点 CA mTLS；P2P 双方只信任节点
+  CA，并校验证书身份、overlay 地址、指纹、有效期和当前协调计划。
+- Relay 仍属于可信边界，回退流量对 Relay 可见；本版本不提供 Relay 端到端加密。
+- 本版本仍是 alpha，尚未完成 Linux 真实 TUN、完整 E2E、故障注入和长时间 soak
+  发布门禁，不应直接用于不受信任的生产网络。

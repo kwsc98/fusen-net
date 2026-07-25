@@ -1,14 +1,14 @@
-version = 1
+version = 2
 
-# Replace each placeholder digest with output from `fusen-net token generate`.
+# Replace each placeholder digest with output from `stellaris token generate`.
 [[nodes]]
 id = "edge-a"
 ipv4 = "10.88.0.2"
-token_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+enrollment_token_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 enabled = true
 
 [[nodes]]
 id = "edge-b"
 ipv4 = "10.88.0.3"
-token_sha256 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+enrollment_token_sha256 = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 enabled = true

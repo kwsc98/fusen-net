@@ -1,148 +1,251 @@
-# Fusen Net 线协议 v1
+# Stellaris 线协议 v2
 
-本文是 Fusen Net 0.1 线协议的规范。关键字“必须”“不得”“应该”和“可以”按
-RFC 2119 的约定理解。
+本文是 Stellaris `0.3.0-alpha.1` 唯一的线协议规范。关键字“必须”“不得”“应该”和
+“可以”按 RFC 2119 的约定理解。v2 仍处于 alpha：在 `0.x` 期间可能发生破坏式
+调整，但实现不得协商其他帧版本、ALPN 或降级路径。
 
-## QUIC 参数
+## 传输与认证
 
-- ALPN：`fusen-net/1`。
-- TLS：1.3，由客户端验证服务端证书、SAN 和配置的 `server_name`。
-- 0-RTT：禁用。控制注册和 Datagram 均不得使用 early data。
-- 控制面：客户端建立的第一条双向流。
-- 数据面：QUIC Datagram；用户 IPv4 包不得放入可靠流。
-- 同一链路两端必须配置相同后端；v1 不承诺跨 QUIC 库直接互操作。
+所有链路使用 QUIC/TLS 1.3 和 Quinn。0-RTT 禁用；控制状态、身份材料和用户包不得
+通过 early data 发送。四种用途由互不相同的 ALPN 隔离：
 
-无法协商 ALPN、Datagram 能力或足以容纳配置 MTU 的 Datagram 大小时，连接必须
-失败，不能静默改用流或拆分一个 IP 包。
+| 链路 | ALPN | TLS 身份 | 可靠流上的握手 |
+| --- | --- | --- | --- |
+| enrollment | `stellaris/enroll/2` | Agent 验证部署 service certificate | `EnrollRequest`, `EnrollAccepted`, `Error` |
+| control | `stellaris/control/2` | Agent 验证 service certificate；Server 验证节点证书 | `ControlWelcome`、候选、连接计划、续期、撤销 |
+| Relay | `stellaris/relay/2` | Agent 验证 service certificate；Server 验证节点证书 | `RelayBind`, `RelayAccepted`, `RelayReady`, `Error` |
+| P2P | `stellaris/p2p/2` | 双方使用节点 CA 完成 mTLS | `P2pHello`, `P2pReady`, `Error` |
 
-## 控制帧
+部署 service certificate 和节点 CA 必须分离。control/Relay TLS 握手提取的节点
+证书身份还必须与静态注册表、当前授权 SPKI、用途和有效期一致。P2P 双方必须验证
+节点 CA、签名 node ID/overlay IP、证书期限和协调方 descriptor 指纹。应用消息不能
+声明或覆盖 TLS 已认证身份。
 
-所有多字节整数使用网络字节序。固定 12-byte 头如下：
+ALPN 不匹配、缺少要求的 peer certificate、Datagram 不可用或最大 Datagram 小于
+协商 MTU 时必须关闭连接，不能改用可靠流承载用户包。
+
+## 固定帧
+
+四类握手都在一条双向 QUIC stream 上使用相同的 12-byte 头。多字节整数使用网络
+字节序：
 
 ```text
 0               4       6       7       8              12
 +---------------+-------+-------+-------+----------------+
-| magic "FNET"  | ver   | type  | flags | payload_length |
+| magic "STLR"  | ver   | type  | flags | payload_length |
 +---------------+-------+-------+-------+----------------+
    4 bytes        u16     u8      u8          u32
 ```
 
-- `magic` 必须为 ASCII `FNET`。
-- `ver` 在本规范中必须为 `1`。
-- `flags` v1 必须为 `0`；非零值必须拒绝。
-- `payload_length` 不包含 12-byte 头，最大为 16384 bytes。
-- payload 必须是 UTF-8 JSON 对象。未知字段、重复字段和类型不匹配必须拒绝。
-- 实现必须正确处理流分片和多个连续帧，读取声明长度前先执行上限检查。
+- `magic` 必须为 ASCII `STLR`，`ver` 必须为 `2`，`flags` 必须为 `0`。
+- `payload_length` 不包含头；control/enrollment 最大 16384 bytes，Relay/P2P 握手
+  最大 4096 bytes。实现必须先检查长度再分配或读取 payload。
+- payload 是 UTF-8 JSON 对象。未知字段、重复字段、错误类型、错误方向和语义非法值
+  必须拒绝。
+- 实现必须处理流分片和连续帧；解析失败不得 panic，也不得记录原始 payload。
 
-消息类型：
+规范小写带连字符的 UUID v4 用作 enrollment、session 和 connection ID。请求 ID、
+incarnation 和非空候选对应的 epoch 都是非零 `u64`。证书指纹是叶证书 DER 的
+`sha256:` 加 64 个小写十六进制字符。DER 字段使用规范 base64，不接受等价的非规范
+编码。单个 CSR 最大 4096 decoded bytes，单张证书最大 6144 decoded bytes，证书链
+为 1 至 3 张。
 
-| 值 | 名称 | 方向 | Payload |
-| --- | --- | --- | --- |
-| `0x01` | `Register` | Edge -> Relay | 注册身份和 token |
-| `0x02` | `RegisterAccepted` | Relay -> Edge | 分配地址及 session |
-| `0x03` | `Ready` | Edge -> Relay | TUN 和路由已就绪 |
-| `0x04` | `Error` | 双向 | 协议或策略错误 |
+## Enrollment
 
-### Register
+消息 type：
 
-```json
-{"node_id":"edge-a","token":"fsn1_<base64url-encoded random value>"}
-```
+| 值 | 名称 | 方向 |
+| --- | --- | --- |
+| `0x01` | `EnrollRequest` | Agent -> Server |
+| `0x02` | `EnrollAccepted` | Server -> Agent |
+| `0xff` | `Error` | 双向 |
 
-- `node_id` 必须与静态注册表完全匹配，第一个字符是 ASCII 字母或数字，后续可
-  使用 ASCII 字母、数字、`.`、`_` 和 `-`，长度 1 至 63。
-- `token` 是 token 文件中的 `fsn1_` 前缀值，其随机部分包含 256-bit 熵并使用
-  无填充 base64url 编码。
-  它只允许出现在经验证的 TLS 控制流中，不能写入日志。
-
-### RegisterAccepted
+`EnrollRequest`：
 
 ```json
 {
-  "overlay_ip": "10.88.0.2",
-  "overlay": "10.88.0.0/24",
-  "mtu": 1100,
-  "session_id": "7d444840-9dc0-4a2b-b7b6-39776a78b3bb"
+  "enrollment_id":"550e8400-e29b-41d4-a716-446655440000",
+  "node_id":"edge-a",
+  "enrollment_token":"stl2_<base64url-no-pad>",
+  "csr_der_base64":"<base64 DER>"
 }
 ```
 
-`session_id` 是 Relay 为本次连接生成的随机 UUID，不能跨重连复用。
-`overlay_ip` 必须是注册表绑定的可用单播 IPv4 地址，且位于 `overlay` 内。
+`enrollment_token` 的随机部分解码后必须恰为 32 bytes。CSR 必须证明 Agent 持有其
+私钥。Server 从静态注册表取得 node ID 和 overlay IP，覆盖 CSR 中任何身份、用途或
+CA 请求；私钥不得上传。
 
-### Ready
-
-```json
-{}
-```
-
-Edge 只有在成功创建 TUN 并安装 overlay 路由后才发送 `Ready`。Relay 在收到并
-验证该消息前不得激活会话路由。
-
-### Error
+`EnrollAccepted`：
 
 ```json
-{"code":"authentication_failed","message":"registration rejected","retryable":false}
+{
+  "enrollment_id":"550e8400-e29b-41d4-a716-446655440000",
+  "node_id":"edge-a",
+  "overlay_ip":"10.88.0.2",
+  "overlay_cidr":"10.88.0.0/24",
+  "mtu":1100,
+  "certificate_chain_der_base64":["<leaf>","<node CA>"],
+  "node_ca_certificate_der_base64":"<node CA>",
+  "not_before_unix_seconds":1780000000,
+  "not_after_unix_seconds":1780086400
+}
 ```
 
-v1 错误码如下。`message` 用于诊断，不应包含 token、摘要、注册表内容或内部路径。
+Server 必须在持久提交已消费 token、授权 SPKI 和签发结果后才能返回成功。相同
+node binding、enrollment ID、token 和完整请求的重试返回同一已提交结果；ID 相同但
+内容不一致、token 已被其他请求消费或 token 不匹配时拒绝。认证失败响应不得区分
+node 不存在与 token 错误，也不得泄露注册表或摘要。
 
-| code | 含义 |
-| --- | --- |
-| `authentication_failed` | node ID 或 token 不匹配 |
-| `duplicate_node` | node ID 已有在线/保留会话 |
-| `invalid_request` | 可解析但字段或请求无效 |
-| `protocol_violation` | 帧或状态机违反 v1 规则 |
-| `server_busy` | Relay 暂时无能力接受会话 |
-| `internal` | 未向对端暴露细节的内部失败 |
+## Control
 
-`retryable` 明确表示 Agent 是否可以对该错误自动重试；鉴权和永久协议错误必须为
-`false`。不可信客户端不能用该字段要求 Relay 重试。
+control 连接完成 mTLS 和静态授权后，Server 首先发送 `ControlWelcome`。Agent 在
+收到并验证它之前不得发送其他控制消息。
 
-发送致命 `Error` 后应关闭控制流和连接。鉴权失败应返回统一消息，避免区分 node ID
-不存在与 token 错误。
+| 值 | 名称 | 方向 | 用途 |
+| --- | --- | --- | --- |
+| `0x01` | `AnnounceCandidates` | Agent -> Server | 发布当前 session 的 host candidates |
+| `0x02` | `LookupPeer` | Agent -> Server | 查询 overlay IP 的在线记录 |
+| `0x03` | `PeerRecord` | Server -> Agent | 返回认证身份和候选快照 |
+| `0x04` | `PeerRevoked` | Server -> Agent | 使缓存和路径失效 |
+| `0x05` | `Error` | 双向 | 结构化错误 |
+| `0x06` | `ControlWelcome` | Server -> Agent | 建立 session 与权威网络参数 |
+| `0x07` | `ConnectRequest` | Agent -> Server | 请求按目标地址建立 P2P |
+| `0x08` | `ConnectPlan` | Server -> Agent | 向连接两端分配同一计划 |
+| `0x09` | `RenewCertificate` | Agent -> Server | 在当前 mTLS session 上请求续期 |
+| `0x0a` | `CertificateIssued` | Server -> Agent | 返回新的节点证书链 |
 
-## 状态机
+### Welcome 与新鲜度
 
-```text
-Connected -> Register received -> Reserved -> Ready received -> Active
-     |              |               |              |
-     +--------------+---------------+--------------+--> Error/Closed
+```json
+{
+  "session_id":"550e8400-e29b-41d4-a716-446655440000",
+  "incarnation":4,
+  "overlay_ip":"10.88.0.2",
+  "overlay_cidr":"10.88.0.0/24",
+  "mtu":1100,
+  "certificate_not_after_unix_seconds":1780086400,
+  "coordinator_time_unix_seconds":1780000000
+}
 ```
 
-- 客户端必须先发送且只发送一次 `Register`。
-- Relay 验证静态绑定后保留 node ID 并返回 `RegisterAccepted`。
-- Edge 配置 TUN/路由，随后发送一次 `Ready`。
-- 未进入 `Active` 前收到 Datagram 时 Relay 必须丢弃且不得路由；收到非预期控制
-  消息时必须返回协议错误并关闭连接。
-- 同一 node ID 已被保留或激活时，新连接得到 `duplicate_node`；旧连接不受影响。
-- 连接关闭时，Relay 只清理由该连接 `session_id` 拥有的路由和保留项。
+`incarnation` 是 Server 为 node 持久维护的单调代数。替代 control session 必须取得
+更大值和新 session ID；旧 session 的事件不得更新或清理新 session。Server 在节点
+证书 `NotAfter` 到达时主动关闭 control 和绑定的 Relay。
 
-## Datagram
+请求 ID 使用当前 control session 内的固定 64-bit 滑动重放窗口：窗口内未见过的
+乱序值可以接受；重复值和落后最高值至少 64 的值拒绝。候选 `epoch` 在一个 session
+内严格递增；新 incarnation 从 `epoch = 0`、空候选开始。
 
-每个 QUIC Datagram 必须恰好包含一个完整 IPv4 包，从 IPv4 版本/IHL 字节开始，
-不得包含 Linux PI、macOS utun 地址族头、以太网头或额外 framing。
+### Candidates 与目录
 
-发送和接收时必须验证：
+```json
+{
+  "epoch":1,
+  "candidates":[
+    {"address":"192.0.2.10:7100","kind":"host","priority":100}
+  ]
+}
+```
 
-1. 长度至少覆盖 IPv4 基本头，version 为 4，IHL 和 total length 合法。
-2. IPv4 `total_length` 与 Datagram 长度完全一致，且不超过协商 MTU；v1 MTU
-   范围为 576..=1100，保证包连同 QUIC 开销可放入最小路径 MTU。
-3. Edge 发出的源地址等于其 `RegisterAccepted.overlay_ip`。
-4. 目标位于 `overlay`，是非网络地址、非广播、非组播的单播地址。
-5. Relay 路由目标为一个处于 `Active` 状态的会话。
+每个列表最多 16 项，SocketAddr 不得重复。当前运行时只接受 IPv4 `host`：端口非零，
+地址不能是 unspecified、loopback、multicast、broadcast 或 `0.0.0.0/8`。
+`server_reflexive` 是保留枚举值，Agent 不得发布，本阶段路径管理器也不使用它。
 
-不符合条件的 Datagram 直接丢弃，只记录脱敏原因，不返回或记录用户包内容。Relay
-为每个目标会话设置容量 256 项的应用层路由队列。传输后端的内部 Datagram 缓冲也
-必须有界，但计量方式并不统一：s2n 和 vendored gm-quic 的收发队列分别为 256 项，
-Quinn 的收发缓冲分别使用 128 KiB 字节预算，因此能容纳的包数随 Datagram 长度变化。
-应用队列或后端发送缓冲没有空间时，按对应契约拒绝或丢弃新 Datagram，并增加可见
-的队列或 transport 丢弃计数。部分后端不会向应用暴露接收缓冲淘汰计数，该指标与
-更细的校验原因聚合仍是稳定版前的可观测性缺口，不属于线协议。协议不增加序号、
-确认、重传或分片，保留普通 IP 网络的丢包和乱序语义。
+`PeerRecord` 和 `PeerDescriptor` 由 Server 从同一认证 session 构造，包含 node ID、
+overlay IP、incarnation、session ID、叶证书指纹、证书期限、候选 epoch 和候选列表。
+Agent 必须先比较 incarnation，再在相同 incarnation/session 内比较 candidate epoch。
+记录本身不是 P2P Ready 证明。
 
-## 版本兼容
+### Connection plan
 
-头部版本是完整协议版本，不进行隐式降级。收到非 v1 帧时拒绝并关闭连接；在能够
-安全返回结构化错误时可以使用 `protocol_violation`。`0.x` 发布可能以新协议版本引入不兼容变化，
-客户端和服务端应使用同一发布系列。详细策略见
-[`compatibility.md`](compatibility.md)。
+`ConnectRequest` 包含非零 `request_id` 和目标 `overlay_ip`。目标在线且有候选时，
+Server 生成一个 `connection_id`，向请求方发送 `role = "initiator"` 的计划，并向
+目标发送 `role = "responder"` 的同一计划。每份 `ConnectPlan` 都包含对端
+`PeerDescriptor` 和 `expires_at_unix_seconds`；期限不得晚于任一节点证书到期时间。
+
+角色只定义握手计划。双方都可准备入站并拨号；重复连接由确定性规则仲裁，最终每个
+目标只保留一个 Ready 路径。在 Ready 前数据继续走 Relay。
+
+### Certificate renewal
+
+`RenewCertificate` 只允许在当前已认证 control session 上发送，包含请求 ID 和新的
+CSR DER。CSR 的 SPKI 必须等于当前认证节点证书的 SPKI。`CertificateIssued` 回显
+请求 ID，返回证书链及准确的 `not_before`/`not_after`；不得借续期改变 node ID、
+overlay IP、公钥或节点 CA。
+
+节点证书当前有效期为 24 小时。Agent 在约半个有效期、最多正负 30 分钟抖动时续期。
+新证书必须安全安装并用于替代 control/Relay 会话；旧证书到期后既有连接必须关闭。
+
+### Revocation 与 Error
+
+`PeerRevoked` 包含 node ID、overlay IP 和独立的单调撤销 epoch。它不能和 candidate
+epoch 比较。收到更新撤销时，Agent 必须清理 descriptor、停止新探测、关闭匹配 P2P
+并使后续包回退 Relay；Server 必须拒绝该节点的新认证会话。
+
+`Error` 格式：
+
+```json
+{"request_id":42,"code":"peer_not_found","message":"peer is not online","retryable":true}
+```
+
+`request_id` 可省略，存在时非零。`message` 为 1..=512 bytes 且不含控制字符、秘密、
+内部路径或完整请求。错误码为 `invalid_request`、`protocol_violation`、
+`replay_detected`、`peer_not_found`、`revoked`、`server_busy` 和 `internal`。致命认证、
+方向或帧错误必须关闭连接；`retryable` 不能绕过接收方本地退避和授权策略。
+
+## Relay
+
+消息 type：
+
+| 值 | 名称 | 方向 |
+| --- | --- | --- |
+| `0x01` | `RelayBind` | Agent -> Server |
+| `0x02` | `RelayAccepted` | Server -> Agent |
+| `0x03` | `RelayReady` | 双向 |
+| `0xff` | `Error` | 双向 |
+
+Agent 首先发送当前 `control_session_id` 和 `incarnation`。Server 必须确认 TLS 节点
+身份与该 control lease 完全一致，再返回新的 `relay_session_id`、`mtu` 和
+`max_datagram_size`。Agent 发送含该 session ID 的 `RelayReady`；Server 必须先原子
+安装 Ready 路由，再回显完全相同的 `RelayReady` 作为提交确认。Agent 收到并验证该
+确认后，才能把替代 Relay 视为可用并关闭旧 control/Relay。Server 在提交前不得通过
+新 Relay 路由转发任何 Datagram。
+
+Ready 后，每个 QUIC Datagram 恰好承载一个原始 IPv4 包，不增加 Stellaris 封装。
+Server 校验完整长度、MTU、源地址等于认证节点地址，以及目标是 overlay 内另一个
+Ready 节点。Datagram 允许丢包和乱序，不在控制 stream 上重传用户包。control lease
+结束、证书到期或 session 被替代时 Relay route 立即删除；旧清理事件只能删除自己
+拥有的 session。
+
+## P2P
+
+消息 type：
+
+| 值 | 名称 | 方向 |
+| --- | --- | --- |
+| `0x01` | `P2pHello` | Initiator -> Responder |
+| `0x02` | `P2pReady` | Responder -> Initiator |
+| `0xff` | `Error` | 双向 |
+
+发起方的 `P2pHello` 携带 plan `connection_id`，以及自身的 control session ID、
+incarnation 和证书指纹。响应方必须把 TLS 叶证书与收到的对端 descriptor 逐项比对，
+并只对未过期的当前 plan 返回包含同一 connection ID 和 MTU 的 `P2pReady`。发起方
+同样验证响应方证书和 descriptor 后才可标记 Ready。
+
+Ready 后 Datagram 直接承载原始 IPv4 包。接收方必须要求：源地址等于已认证 peer
+overlay IP，目标地址等于本机 overlay IP，包完整且不超过 MTU。任何身份、plan、
+candidate、证书期限或路径 generation 变化都会使连接失效。
+
+每个出站包只选择 Relay 或 P2P 之一。P2P 发送失败时当前包丢弃，连接转为失效；后续
+包选择 Relay。禁止将失败的同一个包再次投递到 Relay。默认五分钟无应用数据使用后
+回收 P2P，传输 keepalive 不算应用数据。
+
+## 当前范围
+
+本规范只定义静态 IPv4 和 host-candidate LAN P2P。NAT 打洞、地址观察、
+server-reflexive candidate、STUN/TURN、HA、Relay 路径端到端加密、ACL、多租户、
+IPv6 和其他 QUIC 后端需要后续协议/ADR，不能隐式加入当前线协议。
+
+实现存在不等于门禁完成。协议恶意输入、持久化故障注入、Relay/P2P E2E、Linux
+真实 TUN 和资源 soak 的剩余状态见
+[`distributed-network-plan.md`](distributed-network-plan.md)。

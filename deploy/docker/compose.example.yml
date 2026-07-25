@@ -1,23 +1,22 @@
-name: fusen-net
+name: stellaris
 
 services:
-  relay:
+  server:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.server
-    image: fusen-net/server:local
-    command: ["server", "--config", "/etc/fusen-net/server.toml"]
+    image: stellaris/server:local
+    command: ["server", "run", "--config", "/etc/stellaris/server.toml"]
     environment:
-      FUSEN_CERT_FILE: /run/secrets/server_cert
-      FUSEN_KEY_FILE: /run/secrets/server_key
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "7000:7000/udp"
       - "7001:7001/udp"
       - "7002:7002/udp"
     volumes:
-      - ../../configs/server.example.toml:/etc/fusen-net/server.toml:ro
-      - ../../configs/nodes.example.toml:/etc/fusen-net/nodes.example.toml:ro
+      - ./server.toml:/etc/stellaris/server.toml:ro
+      - ../../configs/nodes.example.toml:/etc/stellaris/nodes.toml:ro
+      - server-state:/var/lib/stellaris
     secrets:
       - source: server_cert
         target: server_cert
@@ -45,15 +44,13 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.agent
-    image: fusen-net/agent:local
-    command: ["agent", "--config", "/etc/fusen-net/agent.toml"]
+    image: stellaris/agent:local
+    command: ["agent", "run", "--config", "/etc/stellaris/agent.toml"]
     environment:
-      FUSEN_SERVER_ADDR: 172.30.0.10:7000
-      FUSEN_CA_FILE: /run/secrets/agent_ca
-      FUSEN_TOKEN_FILE: /run/secrets/agent_token
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
-      - ../../configs/agent.example.toml:/etc/fusen-net/agent.toml:ro
+      - ./agent.toml:/etc/stellaris/agent.toml:ro
+      - agent-identity:/var/lib/stellaris
     secrets:
       - source: agent_ca
         target: agent_ca
@@ -71,11 +68,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
-      - /run/fusen-net:size=4m,mode=0700
     networks:
       - overlay-control
     depends_on:
-      - relay
+      - server
     restart: unless-stopped
 
 networks:
@@ -84,12 +80,16 @@ networks:
       config:
         - subnet: 172.30.0.0/24
 
+volumes:
+  server-state:
+  agent-identity:
+
 secrets:
   server_cert:
-    file: ${FUSEN_SERVER_CERT_FILE:-./secrets/server.pem}
+    file: ${STELLARIS_SERVER_CERT_FILE:-./secrets/server.pem}
   server_key:
-    file: ${FUSEN_SERVER_KEY_FILE:-./secrets/server-key.pem}
+    file: ${STELLARIS_SERVER_KEY_FILE:-./secrets/server-key.pem}
   agent_ca:
-    file: ${FUSEN_AGENT_CA_FILE:-./secrets/ca.pem}
+    file: ${STELLARIS_AGENT_CA_FILE:-./secrets/ca.pem}
   agent_token:
-    file: ${FUSEN_AGENT_TOKEN_FILE:-./secrets/edge-a.token}
+    file: ${STELLARIS_AGENT_TOKEN_FILE:-./secrets/edge-a.token}

@@ -1,115 +1,128 @@
-# Fusen Net
+# Stellaris
 
 [English](README.en.md)
 
-Fusen Net 是一个基于 QUIC Datagram 和 TUN 的三层虚拟网络。`0.1` 使用中心
-Relay 转发 IPv4 包：Edge 从本机 TUN 读取完整 IPv4 包，经 QUIC 发送到 Relay，
-Relay 再按照目标 overlay 地址把包转发给另一个在线 Edge。
+Stellaris 是一个基于 QUIC Datagram 和 TUN 的分布式 IPv4 overlay 网络。当前
+`0.3.0-alpha.1` 采用单实例协调服务、可信 Relay 和按需局域网 P2P：Agent 首先
+建立可用的 Relay 路径，发现同一局域网内的目标后尝试 Quinn 直连，并在 P2P
+Ready 后按目标 overlay IP 切换路径。
 
-中文 README 和 `docs/` 是 0.1 行为的权威说明；英文 README 仅提供精简入口。
-
-> **项目状态：早期预览。** `0.1.0-alpha` 正在重构协议、安全边界和跨平台
-> 适配，尚未经过独立安全审计，不应直接暴露在不受信任的生产网络中。旧版
-> TCP 端口代理的命令、配置和协议均不兼容。
+> **项目状态：早期预览。** v2 运行时代码已经接入 CLI，但完整集成测试、Linux
+> 真实 TUN、故障注入和资源 soak 门禁尚未完成。不要把当前 alpha 用于关键生产
+> 流量，也不要根据本文推断某个平台已经通过发布验证。
 
 ```text
-Edge A                  Relay                         Edge B
-10.88.0.2/24            UDP listeners                10.88.0.3/24
-TUN <-> IPv4 packet <-> QUIC Datagram <-> route <-> QUIC Datagram <-> TUN
-            quinn --------^                 ^-------- s2n
+                     +--------------------------------+
+                     |  Coordinator + trusted Relay   |
+                     | enroll :7000 / control :7001   |
+                     | relay  :7002                    |
+                     +---------------+----------------+
+                                     |
+                         control + Relay fallback
+                          /                         \
+                  +-------+-------+         +-------+-------+
+                  |    Agent A    |=========|    Agent B    |
+                  | TUN + P2P UDP |  Quinn  | TUN + P2P UDP |
+                  +---------------+   LAN   +---------------+
 ```
 
-每条 Edge 到 Relay 的链路必须选择相同的 QUIC 后端；Relay 可以同时监听
-`quinn`、`s2n` 和 `gm-quic`，并在不同后端的已认证会话之间转发数据。
+## 能力边界
 
-## 0.1 能力边界
+- 单租户、单信任域、单协调实例、IPv4-only、静态 overlay 地址，最多 256 个节点。
+- 四条隔离链路：注册、控制、Relay 和 P2P；配置使用三个互不冲突的 Server UDP
+  listener，每个 Agent 另有一个 P2P UDP bind。
+- 首次注册使用部署 TLS、一次性 `stl2_` token 和 CSR proof-of-possession；之后控制、
+  Relay 和 P2P 使用节点 CA 签发的短期 mTLS 证书。
+- Agent 先通过可信 Relay 发送，再按需请求连接计划并尝试 host candidate P2P。
+  P2P 失败、断开、过期或空闲回收后，后续包回退 Relay。
+- v2 运行时仅使用 Quinn。s2n-quic 和 gm-quic 依赖及传输抽象仍可编译，但不能由
+  v2 配置选择，也不属于当前运行门禁。
+- 当前只实现局域网 host candidate。NAT 穿透、server-reflexive candidate、STUN、
+  HA、ACL、多租户、IPv6、动态地址、DNS 和子网/默认路由均不在本阶段。
 
-- 中心 Relay、单租户、IPv4-only。
-- 静态绑定 `node_id + token_sha256 + overlay IP`。
-- TLS 服务端认证和每节点 256-bit token 鉴权。
-- 原始 IPv4 Datagram 转发；默认 MTU 为 1100。
-- Linux、macOS 和 Windows 原生 Agent 是首个稳定版的目标平台。
-- 不包含 TCP 端口代理兼容层、ACL、IPv6、DNS、默认路由接管、NAT 穿透、
-  节点发现或完整 mesh。
+> **可信 Relay 边界：** P2P 包由节点间 QUIC mTLS 保护，不经过 Server 数据面；
+> Relay 回退包会在 Server 上解密，Server 可以看到完整 overlay IPv4 包及流量
+> 元数据。本版本不提供 Relay 路径端到端加密。
 
-当前实现和已验证的平台/后端状态见
-[兼容性说明](docs/compatibility.md)，不要仅根据 feature 存在与否判断生产可用性。
+平台状态以[兼容性说明](docs/compatibility.md)为准。Linux 是首轮正式运行门禁；
+macOS 和 Windows 当前只要求编译通过，原生 TUN/P2P 行为尚未验证。
 
 ## 构建
 
-需要 Rust 1.97.0 或更高版本。建议使用仓库中的工具链文件：
+需要 Rust 1.97.0 或更高版本：
 
 ```bash
-rustup show
 cargo build --workspace --all-features --locked
 cargo test --workspace --all-features --locked
+cargo build --release -p stellaris-cli --no-default-features --features backend-quinn --locked
+./target/release/stellaris --version
 ```
 
-正式二进制由 `fusen-net-cli` package 生成，名称为 `fusen-net`：
-
-```bash
-cargo build --release -p fusen-net-cli --all-features --locked
-./target/release/fusen-net --version
-```
-
-Relay 不创建 TUN，通常不需要管理员权限。Agent 需要创建 TUN 和 overlay
-路由：Linux 需要 root 或 `CAP_NET_ADMIN` 及 `/dev/net/tun`，macOS 需要允许
-创建 utun/路由，Windows 需要管理员权限和可用的 Wintun 驱动。
+正式二进制由 `stellaris-cli` package 生成，名称为 `stellaris`。Server 不创建
+TUN；Agent 在 Linux 上需要 `/dev/net/tun` 和 root 或 `CAP_NET_ADMIN`。
 
 ## 快速开始
 
-示例配置位于 [`configs/`](configs/)。开始前准备一个 SAN 与 Agent 使用的
-`server_name` 一致的服务端证书，并让 Agent 信任其签发 CA。证书私钥不得提交
-到仓库。
+示例位于 [`configs/`](configs/)。以下流程会创建全新的 v2 状态；旧配置、旧状态和
+旧 Agent 不能继续使用。
 
-1. 为每个 Edge 生成独立 token：
+1. 准备部署服务证书和私钥。证书 SAN 必须匹配 Agent 配置中的 `server_name`，
+   Agent 的 `deployment_ca_file` 必须信任其签发 CA。部署 CA 与稍后生成的节点 CA
+   是两个不同的信任根。
 
-   ```bash
-   mkdir -p ./secrets
-   cargo run --locked -p fusen-net-cli -- token generate \
-     --node-id edge-a --output ./secrets/edge-a.token
-   ```
-
-2. 将命令输出的 `sha256:<hex>` 摘要和分配的 overlay IP 写入
-   `configs/nodes.example.toml` 的副本；调整 Server 和 Agent 配置中的证书、
-   token、地址及 backend。
-
-3. 启动 Relay；监听地址使用 UDP，而不是 TCP：
+2. 为每个节点生成一次性 enrollment token：
 
    ```bash
-   cargo run --locked -p fusen-net-cli -- \
-     config check --config ./configs/server.example.toml
-   cargo run --locked -p fusen-net-cli -- \
-     server --config ./configs/server.example.toml
+   mkdir -p ./configs/secrets
+   stellaris token generate \
+     --node-id edge-a --output ./configs/secrets/edge-a.token
    ```
 
-4. 在 Edge 主机上校验并以所需权限启动 Agent：
+   将输出的 `enrollment_token_sha256`、节点 ID 和静态 IPv4 地址写入
+   `configs/nodes.example.toml` 的副本。不要把 token 明文写入节点表。
+
+3. 调整 Server 配置，校验后显式初始化节点 CA 与协调状态：
 
    ```bash
-   cargo run --locked -p fusen-net-cli -- \
-     config check --config ./configs/agent.example.toml
-   sudo ./target/release/fusen-net agent \
-     --config ./configs/agent.example.toml
+   stellaris config check --config ./configs/server.example.toml
+   stellaris server init --config ./configs/server.example.toml
+   stellaris server run --config ./configs/server.example.toml
    ```
 
-5. 启动两个不同 overlay 地址的 Edge 后，从一端 ping 另一端的 overlay IP。
-   Relay 防火墙必须放行对应 `[[listeners]]` 的 UDP 端口。Fusen Net 只添加
-   overlay CIDR 路由，不会修改默认路由或 DNS。
+   `server init` 不覆盖或轮换已有状态。若上次初始化在完整、严格校验通过的节点 CA
+   certificate/key 已落盘后中断，且协调状态仍缺失，重试会保留该 CA 并补建协调
+   状态；其他不完整、无效或已有协调状态的组合均拒绝。普通 `server run` 不会自动
+   生成缺失、损坏或权限不安全的节点 CA/协调状态。
 
-完整字段、相对路径和环境变量规则见
-[配置参考](docs/configuration.md)，生产部署见
-[部署指南](docs/deployment.md)。
+4. 调整 Agent 配置，在具备 TUN 权限的主机上运行：
+
+   ```bash
+   stellaris config check --config ./configs/agent.example.toml
+   sudo stellaris agent run --config ./configs/agent.example.toml
+   ```
+
+5. 为第二个节点使用独立 token、identity 目录、overlay 地址和 P2P bind。防火墙
+   放行 Server 的 enrollment/control/relay UDP 端口，以及节点间需要直连的 P2P
+   UDP 端口。Stellaris 不修改默认路由或 DNS。
+
+首次注册完成且 identity 目录已持久备份后，可从 Agent 配置中删除
+`identity.enrollment_token_file` 并移除 token secret。证书失效后重新注册需要管理员
+轮换静态摘要并提供新的 token。
+
+`--config` 是运行命令唯一的配置覆盖项，也可由 `STELLARIS_CONFIG` 提供。字段、
+路径和权限规则见[配置参考](docs/configuration.md)。
 
 ## 文档
 
 - [架构](docs/architecture.md)
-- [线协议 v1](docs/protocol.md)
+- [v2 线协议](docs/protocol.md)
 - [配置参考](docs/configuration.md)
 - [安全模型](docs/security-model.md)
 - [兼容性](docs/compatibility.md)
 - [部署](docs/deployment.md)
 - [故障排查](docs/troubleshooting.md)
 - [路线图](docs/roadmap.md)
+- [分布式组网计划与未完成门禁](docs/distributed-network-plan.md)
 - [架构决策记录](docs/adr/README.md)
 - [发布流程](docs/releasing.md)
 - [贡献指南](CONTRIBUTING.md)
@@ -117,7 +130,7 @@ Relay 不创建 TUN，通常不需要管理员权限。Agent 需要创建 TUN �
 
 ## 开源许可
 
-Fusen Net 采用 `Apache-2.0 OR MIT` 双许可。你可以选择任一许可证使用、修改
-和分发本项目。详见 [LICENSE-APACHE](LICENSE-APACHE) 和
-[LICENSE-MIT](LICENSE-MIT)。提交到本仓库且未明确标记为“非贡献”的内容，
-默认按同一双许可提供；项目不要求 CLA 或 DCO。
+Stellaris 采用 `Apache-2.0 OR MIT` 双许可。你可以选择任一许可证使用、修改和分发
+本项目。详见 [LICENSE-APACHE](LICENSE-APACHE) 和 [LICENSE-MIT](LICENSE-MIT)。
+提交到本仓库且未明确标记为“非贡献”的内容默认按同一双许可提供；项目不要求 CLA
+或 DCO。

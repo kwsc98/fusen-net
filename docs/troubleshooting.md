@@ -1,75 +1,90 @@
 # 故障排查
 
-先执行配置校验，并记录二进制版本、平台、后端和非秘密错误信息：
+先记录二进制版本、平台和非秘密错误，再校验配置：
 
 ```bash
-fusen-net --version
-fusen-net config check --config /etc/fusen-net/agent.toml
-RUST_LOG=fusen_net=debug fusen-net agent --config /etc/fusen-net/agent.toml
+stellaris --version
+stellaris config check --config /etc/stellaris/agent.toml
+RUST_LOG=stellaris=debug stellaris agent run --config /etc/stellaris/agent.toml
 ```
 
-提交 Issue 前删除 token、token 摘要、私钥、证书序列号、内网主机名和用户包内容。
+Issue 中删除 token/摘要、私钥、证书序列号、CSR、内部地址、完整控制 payload 和用户
+包内容。当前 macOS/Windows 仅为编译目标；运行问题不应先假设已有平台门禁覆盖。
 
-## Relay 无法监听
+## Server 状态未初始化
 
-- 确认 `bind` 是有效本地地址，多个 `[[listeners]]` 没有重复 SocketAddr。
-- 确认选择的 backend 已编译进当前二进制。
-- 检查端口是否被其他进程占用，并确认开放的是 UDP 而不是 TCP。
-- 非 root 运行 Relay 时避免需要特权的低端口，或由系统能力精确授权。
+- 全新部署必须先运行 `stellaris server init --config ...`，再运行 `server run`。
+- `server init` 不覆盖已有状态。仅当节点 CA certificate/key 同时存在且严格校验有效、
+  协调状态缺失时，命令会沿用该 CA 完成中断的初始化；其他不完整或无效组合均拒绝。
+- 普通启动不会自动生成缺失状态。检查配置中三个状态路径是否不同、父目录权限是否
+  安全、运行用户是否一致。
+- 单独 CA key/certificate、损坏或不匹配 CA、已有协调状态但 CA 不完整时，不要通过
+  删除剩余文件反复初始化。先保留现场并从一致备份恢复，或在确认没有任何需要保留的
+  Agent identity 后重新建设整个信任域。
 
-Linux 可用 `ss -lunp` 查看 UDP listener；macOS 可用 `lsof -nP -iUDP`；Windows
-可用 `Get-NetUDPEndpoint`。这些命令可能需要管理员权限。
+## UDP listener 无法绑定
+
+- 检查 `[listeners]` 的 `enrollment`、`control`、`relay` 都是非零 IPv4 UDP 地址。
+- 三者不能相同；同端口的通配 bind 也会和具体本地地址冲突。
+- 用 Linux `ss -lunp`、macOS `lsof -nP -iUDP` 或 Windows
+  `Get-NetUDPEndpoint` 检查占用。
+- 这些端口分别是协议用途，不是 backend 选择；v2 运行时只使用 Quinn。
 
 ## TLS 或 ALPN 失败
 
-- `server_name` 必须匹配服务端证书 SAN，不等于证书文件名或 Relay node ID。
-- `ca_file` 必须包含签发服务端证书的 CA，而不是服务端私钥。
-- 检查系统时间、证书有效期和证书链顺序。
-- Agent backend 必须与目标 UDP listener 的 backend 相同。
-- 确认中间防火墙/NAT 允许双向 UDP，并且没有把端口转发为 TCP。
+- Agent `server_name` 必须匹配 service certificate SAN；连接 IP 或文件名不能替代。
+- `deployment_ca_file` 必须信任 service certificate 的签发 CA，不是节点 CA。
+- enrollment 只认证 Server；control/Relay 还要求 Agent 节点证书。
+- P2P 双方信任 enrollment 下发的节点 CA，并校验 descriptor 指纹和签名 node/IP。
+- 检查系统时间、证书有效期、PEM 链顺序和 UDP 双向可达性。
+- 确认连接到了正确用途的端口；四条链路的 ALPN 不可互换。
 
-Fusen Net 不提供跳过证书校验的排障选项。不要用永久关闭验证来定位证书问题。
+Stellaris 没有跳过证书验证、ALPN 降级或 insecure 模式。
 
-## 注册被拒绝
+## Enrollment 被拒绝
 
-- node ID 必须与 `nodes_file` 完全一致，区分大小写。
-- Agent token 文件是生成器创建的明文 token；Server 注册表保存的是其 SHA-256
-  摘要，两者不能互换。
-- 每个 node ID 同时只允许一个会话。`duplicate_node` 时先确认旧 Agent 是否仍在
-  运行或处于重连状态。
-- 修改注册表后按当前版本要求安全重载或重启 Relay，不能假设文件会自动热加载。
+- `node_id` 必须与节点表完全一致且 `enabled = true`。
+- Agent 文件保存 `stl2_` 明文 token，节点表保存命令打印的 SHA-256 摘要；二者不能
+  互换。
+- 节点表仅在 Server 启动时加载，修改摘要后必须重启。
+- token 一次成功后即消费。相同 enrollment ID/token/CSR 的持久重试可以得到同一
+  结果；删除 Agent pending identity 后用新 ID 重放 token会被拒绝。
+- identity 目录已有其他 node ID、损坏证书或权限过宽时会 fail-closed。
 
-鉴权失败对外使用统一错误，Relay 不会说明 node ID 还是 token 错误。不要把 token
-粘贴到 Issue 或日志中求助，应在本地重新生成并轮换。
+鉴权响应不会区分 node 不存在和 token 错误。不要在日志或 Issue 中粘贴 token；需要
+更换私钥时按部署指南执行完整 token/SPKI 轮换。
 
-## Agent 无法创建 TUN
+## Control 或 Relay 反复重连
 
-- Linux：确认 `/dev/net/tun` 存在，并授予 root 或 `CAP_NET_ADMIN`。容器需同时
-  使用 `--device /dev/net/tun` 和 `--cap-add NET_ADMIN`。
-- macOS：确认进程有创建 utun 和路由的权限，检查请求的固定名称是否被平台忽略。
-- Windows：以管理员身份运行，确认 Wintun 驱动可用且体系结构匹配。
-- 检查 `tun_name` 是否与现有接口冲突；省略该字段让平台分配名称可帮助定位问题。
+- 节点证书必须未过期，签名 node ID/IP 必须与 enabled 注册项相同，SPKI 必须仍是
+  协调状态中授权值。
+- Relay 必须绑定当前 control session 和 incarnation；control 被替换会主动关闭旧
+  Relay。
+- `ControlWelcome` 中 overlay、MTU、IP 和证书期限必须与本地身份一致。
+- 检查 control/Relay UDP 端口分别可达，不能把两个地址指向同一用途 listener。
+- 续期失败会按退避重试；持续失败直到 `NotAfter` 会关闭现有会话。
 
-不要使用 Docker `--privileged` 作为长期修复。
+## P2P 未建立但 Relay 可用
 
-## 已连接但 overlay 不通
+这是可接受的回退状态。依次检查：
 
-1. 确认两端日志均已进入 `Ready/Active`，Relay 存在两个活动路由。
-2. 检查分配 IP 唯一、属于同一 `overlay_cidr`，目标不是网络/广播地址。
-3. 检查宿主机存在指向 TUN 的 overlay CIDR 路由，且没有更具体的冲突路由。
-4. 查看源地址伪造、overlay 外目标、包格式和超 MTU 的脱敏日志，以及队列/transport
-   溢出计数。
-5. 将应用包控制在配置 MTU 内；路径 MTU 黑洞时先用较小 ping payload 验证。
-6. 检查 Edge 本机防火墙是否允许 TUN 接口上的 ICMP/TCP/UDP。
+1. 两个 Agent 的 `p2p.bind` 端口不同且在 LAN 防火墙中双向可达。
+2. 日志/指标中两端均已发布 IPv4 host candidate，并收到同一 connection plan。
+3. candidate 不能是 wildcard、loopback、multicast、broadcast 或 IPv6。
+4. 两端节点证书、descriptor 指纹、session/incarnation 和 plan 期限仍有效。
+5. 没有 NAT 或端口映射阻断直连；当前版本不做打洞、地址观察或 STUN。
 
-Fusen Net 不修改默认路由或 DNS，所以普通 Internet 流量不经过 overlay 是预期
-行为。QUIC Datagram 允许丢包和乱序，少量 underlay 丢包不会由 Fusen Net 重传。
+P2P send 失败时当前包按设计丢弃，不会补发 Relay；后续包才回退。偶发单包丢失不能
+直接判断为路径切换故障。
 
-## 退出后残留接口或路由
+## TUN 或 overlay 不通
 
-记录退出原因、接口名和路由后，可使用平台原生命令确认资源的创建者。只删除可明确
-归属于 Fusen Net 的 overlay 路由或 TUN；不要批量清空系统路由。复现时检查正常
-SIGINT、TLS 失败、Relay 重启和进程崩溃四种路径。
+- Linux 检查 `/dev/net/tun`，并授予 root 或 `CAP_NET_ADMIN`；容器还要映射设备。
+- `tun_name` 不能和已有接口冲突；省略可让平台分配名称。
+- overlay IP/CIDR/MTU 来自 Server，不在 Agent 配置中。检查节点表地址唯一且可用。
+- 查看宿主机是否存在指向 TUN 的 overlay 路由，以及是否有更具体的冲突路由。
+- 检查源地址、目标地址、IPv4 长度、MTU、queue full 和 unavailable path 丢包计数。
+- Stellaris 不修改默认路由或 DNS，普通 Internet 流量不经过 overlay 是预期行为。
 
-正常退出或可控失败后资源应在 5 秒内回滚。若未回滚，请提交包含平台、版本、配置
-的非秘密部分和相关日志的 Issue。
+不要用 Docker `--privileged` 或关闭证书校验作为长期排障手段。清理残留资源时只删除
+能够明确归属于本次 Stellaris 实例的 TUN 和 overlay 路由，不要批量清空系统路由。

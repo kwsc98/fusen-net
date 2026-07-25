@@ -1,32 +1,41 @@
-# Fusen Net
+# Stellaris
 
 [中文](README.md)
 
-Fusen Net is a layer-3 virtual network built on QUIC Datagrams and TUN. The
-0.1 architecture uses a central Relay: an Edge reads complete IPv4 packets
-from a local TUN device, sends them over QUIC, and the Relay forwards each
-packet to the authenticated Edge owning its destination overlay address.
-The Chinese README and `docs/` are authoritative for 0.1 behavior; this file
-is a compact entry point.
+Stellaris is a distributed IPv4 overlay built on QUIC Datagrams and TUN. The
+current `0.3.0-alpha.1` runtime combines a single coordinator, a trusted Relay,
+and on-demand LAN P2P. Agents establish the Relay path first, request a
+connection plan when traffic targets a peer, and switch that destination to a
+Quinn P2P path only after mutual authentication and the Ready handshake.
 
-> **Status: early preview.** The `0.1.0-alpha` line is undergoing protocol,
-> security, and portability work. It has not received an independent security
-> audit and should not be exposed directly to untrusted production networks.
-> It is incompatible with the old TCP port-forwarding CLI and protocol.
+> **Status: early preview.** The v2 runtime is wired into the CLI, but the full
+> integration, Linux real-TUN, fault-injection, and resource-soak gates are not
+> complete. This alpha is not ready for critical production traffic.
 
-```text
-Edge A             Relay with UDP listeners              Edge B
-TUN <-> IPv4 <-> QUIC Datagram <-> overlay route <-> QUIC Datagram <-> TUN
-```
+The current scope is one tenant and trust domain, one coordinator instance,
+IPv4-only static addresses, at most 256 nodes, and an MTU of 1100 by default.
+Enrollment, control, Relay, and P2P use separate ALPNs. The Server exposes
+three distinct UDP listeners; every Agent also binds one UDP socket for LAN
+P2P.
 
-An Edge and the Relay listener it connects to must use the same backend.
-The Relay may listen with `quinn`, `s2n`, and `gm-quic` at the same time and
-route packets between authenticated sessions using different backends.
+Initial enrollment uses deployment TLS, a one-time `stl2_` token, and CSR
+proof-of-possession. The Server-created node CA then issues short-lived mTLS
+certificates for control, Relay, and peer connections. The deployment CA and
+node CA are separate trust roots.
 
-The 0.1 scope is a central Relay, one trusted tenant, IPv4 only, static node
-registration, server-authenticated TLS, per-node 256-bit tokens, and an MTU of
-1100 by default. ACLs, IPv6, DNS, default-route takeover, NAT traversal, peer
-discovery, and a full mesh are out of scope.
+The v2 runtime uses Quinn only. The s2n-quic and gm-quic dependencies and
+transport abstractions remain compileable, but v2 configuration cannot select
+them. NAT traversal, server-reflexive candidates, STUN, HA, ACLs, multi-tenancy,
+IPv6, dynamic addresses, DNS, and subnet/default routing are deferred.
+
+**Trusted Relay boundary:** peer traffic on a P2P path is protected by QUIC
+mTLS between the Agents. Fallback traffic is decrypted by the Relay, which can
+observe complete overlay packets and traffic metadata. Relay-path end-to-end
+encryption is not provided.
+
+Linux is the first runtime release gate. macOS and Windows are currently
+compile-only and their native TUN/P2P behavior is unverified. See the
+[compatibility matrix](docs/compatibility.md).
 
 ## Build
 
@@ -35,37 +44,52 @@ Rust 1.97.0 or later is required.
 ```bash
 cargo build --workspace --all-features --locked
 cargo test --workspace --all-features --locked
-cargo build --release -p fusen-net-cli --all-features --locked
-./target/release/fusen-net --version
+cargo build --release -p stellaris-cli --no-default-features --features backend-quinn --locked
+./target/release/stellaris --version
 ```
 
-The Relay does not create a TUN device and normally needs no elevated
-privileges. An Agent needs permission to create a TUN interface and an overlay
-route. On Linux that means `/dev/net/tun` and root or `CAP_NET_ADMIN`; macOS and
-Windows require their corresponding administrative permissions.
+The Server does not create a TUN device. A Linux Agent needs `/dev/net/tun` and
+root or `CAP_NET_ADMIN`.
 
 ## Run
 
-Start from the files under [`configs/`](configs/). Supply a server certificate
-whose SAN matches the Agent's `server_name`, and never commit its private key.
+Start from [`configs/`](configs/). Supply a deployment service certificate
+whose SAN matches `coordinator.server_name`, and make the Agent trust its CA.
 
 ```bash
-fusen-net token generate --node-id edge-a --output ./secrets/edge-a.token
-fusen-net config check --config ./configs/server.example.toml
-fusen-net server --config ./configs/server.example.toml
-sudo fusen-net agent --config ./configs/agent.example.toml
+mkdir -p ./configs/secrets
+stellaris token generate --node-id edge-a --output ./configs/secrets/edge-a.token
+stellaris config check --config ./configs/server.example.toml
+stellaris server init --config ./configs/server.example.toml
+stellaris server run --config ./configs/server.example.toml
+stellaris config check --config ./configs/agent.example.toml
+sudo stellaris agent run --config ./configs/agent.example.toml
 ```
 
-Relay listeners are UDP. Fusen Net adds only the overlay CIDR route and does
-not alter the default route or DNS. See the authoritative Chinese
-[configuration reference](docs/configuration.md),
-[architecture](docs/architecture.md), [protocol](docs/protocol.md), and
-[security model](docs/security-model.md). Current backend and platform status
-is tracked in [compatibility](docs/compatibility.md).
+Put the printed enrollment-token digest, not the token, in the static node
+registry. `server init` never replaces or rotates existing state. It may resume
+only when a complete, strictly valid node CA certificate/key pair exists and
+the coordinator state is still absent; every other partial, invalid, or
+already-committed state combination is rejected. Normal startup will not
+regenerate missing or invalid state. The only runtime override is `--config`,
+also available as `STELLARIS_CONFIG`.
+
+After enrollment succeeds and the identity directory is durably backed up,
+`identity.enrollment_token_file` and its secret mount may be removed. A new
+token and registry digest are required if an expired identity must enroll again.
+
+Open the Server enrollment, control, and Relay UDP ports and the Agent P2P UDP
+ports required for direct LAN reachability. Stellaris does not alter the
+default route or DNS.
+
+The authoritative Chinese references are the [architecture](docs/architecture.md),
+[v2 protocol](docs/protocol.md), [configuration](docs/configuration.md),
+[security model](docs/security-model.md), and
+[remaining verification plan](docs/distributed-network-plan.md).
 
 ## License and contributions
 
-Fusen Net is available under `Apache-2.0 OR MIT`; choose either license. See
+Stellaris is available under `Apache-2.0 OR MIT`; choose either license. See
 [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT), and
 [CONTRIBUTING.md](CONTRIBUTING.md). Contributions are submitted under the same
 dual license by default. No CLA or DCO is required.

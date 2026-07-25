@@ -1,0 +1,29 @@
+version = 2
+
+[network]
+overlay_cidr = "10.88.0.0/24"
+mtu = 1100
+
+[registry]
+nodes_file = "/etc/stellaris/nodes.toml"
+
+[storage]
+coordinator_state_file = "/var/lib/stellaris/coordinator-state.json"
+
+[tls]
+server_name = "server"
+service_cert_file = "/run/secrets/server_cert"
+service_key_file = "/run/secrets/server_key"
+node_ca_cert_file = "/var/lib/stellaris/node-ca.pem"
+node_ca_key_file = "/var/lib/stellaris/node-ca-key.pem"
+
+[listeners]
+enrollment = "0.0.0.0:7000"
+control = "0.0.0.0:7001"
+relay = "0.0.0.0:7002"
+
+[limits]
+max_nodes = 256
+max_connections_per_ip = 8
+max_pending_handshakes = 64
+queue_capacity = 256

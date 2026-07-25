@@ -1,15 +1,15 @@
 [workspace]
-members = ["crates/fusen-net", "apps/fusen-net-cli"]
+members = ["crates/stellaris", "apps/stellaris-cli"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.1"
+version = "0.3.0-alpha.1"
 authors = ["kwsc98 <kwsc98@gmail.com>"]
 edition = "2024"
 rust-version = "1.97.0"
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/kwsc98/fusen-net"
-homepage = "https://github.com/kwsc98/fusen-net"
+repository = "https://github.com/kwsc98/Stellaris"
+homepage = "https://github.com/kwsc98/Stellaris"
 
 [workspace.dependencies]
 async-trait = "0.1.89"
@@ -19,8 +19,11 @@ clap = { version = "4.5.53", features = ["derive", "env"] }
 futures = "0.3.31"
 gm-quic = { version = "0.4.0", features = ["unreliable"] }
 ipnet = { version = "2.11.0", features = ["serde"] }
+libc = "0.2.186"
+pem = "3.0.6"
 quinn = { version = "0.11.9", features = ["runtime-tokio"] }
 rand = "0.8.5"
+rcgen = { version = "0.13.2", features = ["x509-parser"] }
 rustls = "0.23.26"
 s2n-quic = { version = "1.72.0", features = ["unstable-provider-datagram"] }
 serde = { version = "1.0.219", features = ["derive"] }
@@ -28,12 +31,14 @@ serde_json = "1.0.140"
 sha2 = "0.10.9"
 subtle = "2.6.1"
 thiserror = "2.0.12"
+time = "0.3.54"
 tokio = { version = "1.48.0", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 toml = "0.8.20"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tun = { version = "0.8.5", features = ["async", "verify_binary_signature"] }
 uuid = { version = "1.16.0", features = ["v4"] }
+x509-parser = { version = "0.18.1", features = ["verify"] }
 
 [patch.crates-io]
 # qconnection 0.4.0 negotiates RFC 9221 but omits DatagramFlow from

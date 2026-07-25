@@ -1,64 +1,69 @@
 # 路线图
 
-路线图描述目标，不是发布日期承诺。是否完成以对应 Release、CI 和兼容矩阵为准。
+路线图描述目标和退出门禁，不承诺日期。代码存在不等于阶段完成；只有实现、CI、
+真实网络证据和文档全部满足门禁后，才能将能力标记为已验证。
 
-## 0.1.0-alpha.1：开源基线
+## `0.3.0-alpha.1`：破坏式 v2 切换
 
-当前阶段目标：
+当前代码目标是一次完成新的分布式运行边界：
 
-- 标准化 workspace：`crates/fusen-net` 核心库和 `apps/fusen-net-cli` 应用。
-- 固定 Rust 1.97.0、Edition 2024、lockfile、统一 lint 和基础 CI。
-- 建立中英文入口、架构/协议/安全/部署文档和双许可证。
-- 提供严格 TOML、配置校验、token 生成器及不包含秘密的示例。
-- 移除旧 TCP 文档、硬编码公网地址以及仓库内测试私钥。
+- [x] CLI 使用 `server init|run`、`agent run`、`config check`、`token generate`。
+- [x] 严格 schema v2、静态节点表、三个 Server UDP listener 和 Agent P2P bind。
+- [x] 四类独立 ALPN、固定 v2 帧、方向/大小/JSON 严格校验。
+- [x] 节点 CA 初始化、Agent 本地密钥、一次性 enrollment、24 小时节点证书和持久
+  授权 SPKI/幂等结果。
+- [x] Quinn control 与 Relay runtime、control lease 绑定、Ready 后 Datagram 路由。
+- [x] Quinn Hybrid endpoint、host candidate connection plan、按需 LAN P2P、单路径选择、
+  Relay 回退和五分钟默认空闲回收。
+- [x] 会话、路径包、丢包、证书操作、P2P 结果、路径切换和队列高水位计数核心。
 
-退出条件：普通 build/test/fmt/clippy/rustdoc 和许可证/漏洞检查通过，CLI 配置与
-token 子命令可用；未接通的数据面必须明确标为不可用。
+本 alpha **尚未完成**：
 
-## 0.1.0-alpha.2：可运行应用
+- [ ] 完整 workspace test/Clippy/rustdoc 在最终改造树上全部通过；
+- [ ] enrollment/control/Relay/P2P 网络集成及恶意输入矩阵；
+- [ ] 写入、fsync、rename、目录 fsync 的逐点持久化故障注入；
+- [ ] 两节点和多节点 LAN P2P、同时拨号、续期替换、撤销和 session ABA E2E；
+- [ ] 用包 ID 证明切换无主动重复包、无环路，P2P 失败包不补发；
+- [ ] Linux namespace 真实 TUN 的 ping/TCP/UDP、Server/Agent 重启、故障注入；
+- [ ] 至少 30 分钟连接抖动和资源 soak；
+- [ ] 256 节点容量边界验证。
 
-- 接通 `server` 和 `agent` CLI 到核心运行时，支持多 listener Relay。
-- 完成安全配置优先级、秘密文件权限检查和相对路径语义。
-- Agent 只管理 overlay CIDR 路由，支持正常退出清理和退避重连。
-- 用运行时生成的测试 CA/证书替代任何嵌入私钥。
+因此当前只能称为“运行时实现已接入、发布门禁未完成”，不能称为稳定可用。
 
-退出条件：Fake TUN 下一个 Relay、两个 Edge 双向传包、重连、背压和优雅退出
-集成测试通过。
+## 下一阶段：`0.3` LAN P2P 加固
 
-## 0.1.0-beta.1：协议和安全
+下一步优先关闭当前门禁，而不是扩展协议范围：
 
-- 完成 `FNET` v1 控制帧、注册状态机和严格边界解析。
-- 完成静态地址分配、常量时间 token 验证、session 所有权路由和源地址校验。
-- 清除网络输入路径的 panic/todo/吞错，所有运行队列有界。
-- 增加随机输入、异常包、重复节点和路由竞态测试。
+1. 完成真实 enrollment -> control -> Relay -> TUN 双向闭环测试。
+2. 完成双/多 Agent LAN P2P 和 Relay/P2P 原子切换证据。
+3. 完成证书续期替代会话、到期关闭、token/SPKI 轮换和撤销测试。
+4. 完成持久化 crash consistency、恶意输入、背压和资源泄漏检查。
+5. 让 Linux `tests/e2e/run-real-tun.sh linux all` 的全部命名门禁真实存在并通过。
 
-退出条件：协议/安全单元测试、Fake TUN 故障测试、依赖安全门禁全部通过，威胁
-模型与实现复核一致。
+macOS 和 Windows 在本阶段保持编译通过、运行未验证，不阻塞首轮 Linux alpha 门禁。
 
-## 0.1.0-rc.1：后端和平台
+## `0.4`：NAT 穿透
 
-- Quinn、s2n-quic、gm-quic 通过统一 transport 契约测试。
-- Linux、macOS 和 Windows 平台适配统一输出无平台头 IPv4 包。
-- 三个平台的真实 TUN runner 完成 ping/TCP/UDP、重连和路由回滚。
-- 发布二进制、Linux 镜像、checksum、SBOM 和 provenance 的流水线演练。
+LAN 门禁完成后再设计和实现：
 
-退出条件：[`releasing.md`](releasing.md) 中全部稳定版门禁通过，无未处理的高危
-安全问题。
+- P2P socket 的服务端观察地址与 server-reflexive candidate；
+- 双向 UDP 打洞、候选优先级和路径健康探测；
+- 常见 NAT 实验矩阵，以及对称/不可穿透 NAT 的稳定 Relay 回退；
+- 地址变化、丢包、乱序和 MTU 黑洞后的恢复。
 
-## 0.1.0：首个稳定版本
+本阶段不依赖外部 STUN；若要加入 STUN/TURN，需新的 ADR 和威胁模型。
 
-稳定版范围仍是中心 Relay、单租户和 IPv4-only。稳定表示文档中的支持矩阵和恢复
-标准已经验证，不表示具备 ACL、IPv6、默认路由、DNS、NAT 穿透或 mesh。
+## `0.5`：规模与加固
 
-## 后续候选方向
+- 256 在线节点容量与资源 soak；
+- 指标导出发布门禁、健康检查和运维告警；
+- 持续 fuzz、故障注入、连接抖动和协调服务重启；
+- 内存、任务、文件描述符和队列不得持续增长。
 
-以下内容需独立 ADR、威胁模型和版本计划，尚未承诺进入具体版本：
+## `1.0`：分布式稳定版
 
-- 多租户和显式 ACL；
-- 动态地址租约及持久化；
-- IPv6 overlay；
-- 角色为 `Hybrid` 的监听/拨号节点；
-- 节点发现、路由通告、NAT 穿透和分布式组网。
+在 Linux 稳定门禁基础上完成部署/恢复演练、威胁模型复核、安全审查和明确支持矩阵。
+macOS/Windows 只有在各自真实 TUN/P2P 证据完成后才提升为运行支持。
 
-在完整 mesh 之前，优先保证中心模型的正确性、安全性、恢复能力和资源稳定性；0.1
-不设置吞吐量 SLA。
+多协调服务 HA、Relay 路径端到端加密、多租户、ACL、IPv6、动态地址、管理 API、
+DNS、默认/子网路由、外部 STUN/TURN 和其他 QUIC 实现的运行支持留到后续版本。

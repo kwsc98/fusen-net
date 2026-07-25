@@ -1,0 +1,41 @@
+[package]
+name = "stellaris-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line application for the Stellaris overlay network"
+publish = false
+
+[[bin]]
+name = "stellaris"
+path = "src/main.rs"
+doc = false
+
+[features]
+default = ["backend-quinn"]
+backend-quinn = ["stellaris/backend-quinn"]
+backend-s2n = ["stellaris/backend-s2n"]
+backend-gm-quic = ["stellaris/backend-gm-quic"]
+all-backends = ["backend-quinn", "backend-s2n", "backend-gm-quic"]
+
+[dependencies]
+base64.workspace = true
+clap.workspace = true
+stellaris = { path = "../../crates/stellaris", default-features = false }
+ipnet.workspace = true
+libc.workspace = true
+rand.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

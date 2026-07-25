@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability privately
-    url: https://github.com/kwsc98/fusen-net/security/advisories/new
+    url: https://github.com/kwsc98/Stellaris/security/advisories/new
     about: Do not disclose vulnerabilities, credentials, or packet contents in a public issue.

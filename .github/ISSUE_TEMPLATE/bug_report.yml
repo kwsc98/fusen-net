@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible defect in Fusen Net
+description: Report a reproducible defect in Stellaris
 title: "[Bug]: "
 labels: [bug, triage]
 body:
@@ -11,22 +11,22 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `fusen-net --version` or the commit SHA.
-      placeholder: fusen-net 0.1.0-alpha.1
+      description: Output of `stellaris --version` or the commit SHA.
+      placeholder: stellaris 0.3.0-alpha.1
     validations:
       required: true
   - type: dropdown
     id: role
     attributes:
       label: Role
-      options: [Relay server, Edge agent, Both]
+      options: [Coordinator/Relay server, Agent, Both]
     validations:
       required: true
   - type: dropdown
     id: transport
     attributes:
       label: QUIC backend
-      options: [Quinn, s2n-quic, gm-quic, Multiple or unknown]
+      options: [Quinn]
     validations:
       required: true
   - type: input

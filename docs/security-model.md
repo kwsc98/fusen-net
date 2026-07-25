@@ -1,92 +1,122 @@
 # 安全模型
 
-本文说明 Fusen Net 0.1 保护什么、信任什么以及明确不保护什么。它不是安全审计
-报告。项目处于 alpha 阶段，部署者应先完成自己的风险评估。
+本文说明 Stellaris `0.3.0-alpha.1` 保护什么、信任什么以及明确不保护什么。它不是
+安全审计报告。实现仍未通过完整恶意输入、真实 TUN、故障注入和资源 soak 门禁，
+部署者不得把 alpha 用于关键生产流量。
 
-## 资产和参与者
+## 参与者与资产
 
-需要保护的资产包括节点 token、Relay TLS 私钥、overlay 地址身份、控制面完整性
-和经 overlay 传输的用户包。参与者分为：
+需要保护的资产包括部署 service 私钥、节点 CA 私钥、Agent 节点私钥、一次性
+enrollment token、持久协调状态、overlay 身份、控制面完整性和用户 IPv4 包。
 
-- **Relay 管理员**：管理证书、静态节点注册表、监听和日志，被完全信任。
-- **Edge 管理员**：管理单个 Edge 的 token 和宿主机，被信任只使用分配地址。
-- **同租户节点**：已经通过鉴权，可以与所有其他在线节点通信，但不应能冒充它们。
-- **网络攻击者**：可以监听、丢弃、重放、延迟或注入公网 UDP 包。
-- **未认证客户端**：可以向公开 listener 建立连接并发送恶意输入。
+- **部署管理员**管理 Server、部署证书、节点 CA、静态注册表和持久状态，被完全信任。
+- **Agent 管理员**管理一个节点的 token、identity 目录和宿主机。
+- **同信任域节点**已经取得节点证书，可与其他节点通信，但不得冒充其他 node/IP。
+- **网络攻击者**可监听、丢弃、延迟、重放或注入 underlay UDP 包。
+- **未认证客户端**可连接公开 listener 并发送畸形或资源消耗型输入。
 
-Relay 是信任边界，不提供端到端加密。QUIC TLS 只保护 Edge 与 Relay 之间的每条
-链路；Relay 解密后可以看到完整 overlay IPv4 包、源/目标地址、长度和时序。需要
-对 Relay 隐藏内容时，应用必须自行使用 TLS、SSH、WireGuard 等端到端保护。
+系统是单租户全互通模型，不提供 ACL、端口过滤或租户隔离。不要把互不信任的组织
+放入同一个节点 CA、静态注册表或 overlay。
 
-## 身份和凭据
+## 信任根
 
-- 每个 Edge 使用独立的 256-bit CSPRNG token。不得复制 token 给其他节点。
-- Agent token 文件保存带 `fsn1_` 前缀、含 256-bit 随机熵的明文值；Relay
-  注册表只保存其规范 token 字符串的 `sha256:<hex>` 摘要，并使用常量时间比较。
-- Token 通过已验证的 TLS 控制流发送。TLS 只认证服务端，客户端身份由 token
-  提供，不使用客户端证书。
-- Agent 必须验证配置 CA、证书有效期、SAN 和显式 `server_name`；没有
-  `--insecure`、自签名自动信任或验证失败回退。
-- 禁用 TLS key log 和 0-RTT，避免 token 进入可重放 early data。
+Stellaris 有两个独立的 CA 边界：
 
-SHA-256 摘要不能挽救低熵 token；安全性依赖生成器确实产生 256-bit 随机值。
-Token 轮换采用替换注册表摘要、分发新文件并重启对应 Agent 的方式。怀疑泄露时应
-先撤销节点条目或停止 listener，再轮换，不要等待例行发布。
+1. **部署 TLS CA**签发 Server service certificate。Agent 用它验证三个 Server
+   listener 的 TLS 身份和显式 `server_name`。
+2. **节点 CA**由 `stellaris server init` 创建。它签发 24 小时节点证书，用于
+   control/Relay 客户端认证和节点间 P2P mTLS。
+
+协调服务、节点 CA 和可信 Relay 都属于首版信任边界。节点 CA 或协调服务被攻破后，
+攻击者可以签发或发布伪造节点身份。部署 service 私钥被攻破可冒充 Server endpoint；
+结合 enrollment token 泄露可能取得节点证书。
+
+> **Relay 不提供端到端机密性。** P2P 路径由两个 Agent 之间的 QUIC mTLS 保护；
+> Relay 回退路径在 Server 上解密，因此 Relay 可以看到完整 overlay IPv4 包、源/目标、
+> 长度和时序。需要对 Relay 隐藏内容时，应用必须自行使用 TLS、SSH、WireGuard 等
+> 端到端保护。
+
+## Enrollment 与节点身份
+
+- `stellaris token generate` 为每个节点产生独立的 256-bit `stl2_` token。静态节点
+  表只保存 SHA-256 摘要，并使用常量时间比较。
+- token 仅在已验证的部署 TLS 连接内发送。Server 成功持久提交签发结果后原子标记
+  token 已消费；相同持久 enrollment 请求可幂等重试，其他重用拒绝。
+- Agent 在私有 identity 目录中生成 P-256 私钥并用 CSR 证明持有它。私钥不得上传。
+- Server 从静态注册表覆盖 node ID 和 overlay IPv4，并禁止 CSR 请求 CA 能力或其他
+  身份。节点证书把 node ID、overlay IP、公钥和用途放入签名内容。
+- Server 持久化当前授权 SPKI。control/Relay TLS 链验证成功后，还必须要求证书身份、
+  静态绑定、enabled 状态、撤销状态和授权 SPKI 全部一致。
+
+仅修改静态 token 摘要不会自动废除当前授权公钥。安全轮换需要更新节点表、重启
+Server，并由新私钥使用新 token 完成 enrollment；新 enrollment 提交后替换授权 SPKI，
+旧证书不能再次建立授权会话。本阶段没有管理 API，也没有双 token 宽限期。
+
+`enabled = false` 只在 Server 重启后阻止该节点新建 enrollment/control/Relay 会话。
+它不是 `PeerRevoked`：已建立的节点间 P2P 可能继续到连接断开、证书到期或空闲回收。
+当前固定 CLI 没有正式撤销的管理员触发入口；不可逆撤销传播仍属于未完成 E2E 门禁，
+不能把可恢复的 `enabled` 开关描述为即时全网撤销。
+
+## 会话与重放
+
+- enrollment、control、Relay 和 P2P 使用独立 ALPN；0-RTT 禁用。
+- mTLS 后的 node ID/IP 来自已验证证书，客户端消息不能覆盖。
+- control session 使用随机 UUID 和持久单调 incarnation。旧 session 的更新和清理
+  不能影响替代 session。
+- control 请求 ID 使用固定大小重放窗口；候选 epoch 在 session 内严格递增。
+- Relay 必须绑定同一节点的当前 control lease，并在 `RelayReady` 前保持不可路由。
+- P2P 必须同时匹配协调方 connection plan、descriptor 指纹、session、incarnation、
+  证书期限和 Ready 状态。
+- Server 与 Agent 都必须在节点证书 `NotAfter` 主动关闭相关连接，不能只依赖握手时
+  的证书有效期检查。
+
+协调 store 有撤销状态和 `PeerRevoked` 传播能力，但当前 CLI 不提供管理员撤销命令。
+运维上可将节点 `enabled = false` 并重启 Server 来拒绝新会话；正式撤销管理流程仍是
+发布门禁缺口。
 
 ## 数据面策略
 
-Relay 将经过鉴权的会话绑定到一个静态 overlay IPv4 地址和随机 session ID。
-路由只在 `Ready` 后激活。每个入站 Datagram 都要验证：
+每个 QUIC Datagram 恰好包含一个原始 IPv4 包。所有路径检查完整头、总长度和 MTU。
 
-- 是一个长度一致且不超过 MTU 的完整 IPv4 包；
-- 源地址等于会话分配地址；
-- 目标是 overlay CIDR 内的在线单播地址；
-- 不是 IPv6、网络地址、广播、组播或 overlay 外地址。
+- Relay 入站包的源必须等于发送 session 的静态 overlay IP，目标必须是 overlay 内
+  另一个 Ready route。
+- P2P 入站包的源必须等于 mTLS 认证 peer 的 overlay IP，目标必须等于本机 overlay
+  IP。
+- IPv6、网络地址、广播、组播、overlay 外地址、畸形和超 MTU 包全部丢弃。
+- 每个出站包只选择一个路径。P2P send 失败的当前包不得补发到 Relay，避免 Stellaris
+  主动制造重复包；后续包回退 Relay。
 
-这阻止普通节点伪造另一个 overlay 地址，但不能限制合法节点访问哪些其他节点。
-0.1 是单租户全互通模型，不提供 ACL、租户隔离、端口过滤或流量检查。不要把互不
-信任的组织或安全域放入同一个 Relay 注册表。
+QUIC Datagram 自身允许丢包、乱序和重复。Stellaris 不提供 IP 包重传或排序；应用
+需要可靠性时应在 overlay 上运行 TCP 或其他可靠协议。
 
-## 威胁和控制
+## 持久化与本地权限
 
-| 威胁 | 0.1 控制 | 剩余风险 |
-| --- | --- | --- |
-| 公网窃听/篡改 | QUIC TLS 1.3、CA/SAN/SNI 校验 | 流量元数据仍可见；Relay 可见明文内层包 |
-| 冒充 Edge | 独立高熵 token、摘要存储、常量时间比较 | Edge 主机或 token 文件被攻破后可被冒充 |
-| 源地址伪造 | 会话与静态 IP 绑定，逐包校验 | 已认证节点仍可攻击允许访问的服务 |
-| 重复 node ID | `reject-new`、路由绑定 session ID | 攻击者可用已泄露 token 抢先占用节点身份 |
-| 内存耗尽 | 16 KiB 控制帧上限、每会话 256 项的应用队列、后端有界 Datagram 缓冲（s2n/gm-quic 收发各 256 项，Quinn 收发各 128 KiB）、gm-quic 每类 256 项的可靠帧分发队列、1024 连接上限和 10 秒握手超时 | Quinn 可容纳的包数随包长变化；公网 listener 仍可能遭受 CPU/带宽 DoS，需部署速率限制并完成背压与 soak 门禁 |
-| 畸形包触发崩溃 | 边界解析、禁止网络路径 panic、固定种子随机语料回归测试 | 尚未接入持续 fuzz；未审计实现可能仍有缺陷 |
-| 秘密泄露到日志 | 结构化脱敏、禁止记录 payload/包体 | OS、崩溃转储和管理员工具仍可能读取进程内存 |
-| 依赖供应链 | lockfile、`cargo audit`、`cargo deny`、SBOM | 新漏洞可能尚未披露或无修复版本 |
+节点 CA、协调状态、Agent 私钥和证书安装采用先写临时文件、fsync、原子替换和目录
+fsync 的持久路径；变更落盘前不得对网络确认。持久写入失败会使协调 store fail-closed，
+避免继续基于未确认内存状态应答。完整故障点注入矩阵尚未达到发布门禁。
 
-## 权限边界
+Unix 上，service 私钥、节点 CA 私钥、协调状态、token 和 Agent identity 必须由
+effective UID 所有且 group/other 不可访问。Windows 使用受限 ACL，但 Windows
+运行时目前未验证。Stellaris 不负责磁盘加密、备份密钥、宿主机补丁或硬件密钥保护。
 
-Relay 不需要 TUN 或管理员权限，应使用非 root 账户运行。Agent 需要创建接口和路由；
-在 Linux 容器中只授予 `/dev/net/tun` 和 `CAP_NET_ADMIN`，不得使用
-`--privileged`。生产环境应在接口初始化后尽量降低权限，并通过服务管理器限制文件、
-设备和网络访问。
+## 资源与拒绝服务
 
-Token 和私钥在 Unix 上必须禁止 group/other 权限，Windows ACL 只能授权所有者、
-Administrators 和 SYSTEM。Fusen Net 不负责磁盘加密、宿主机补丁、备份安全或
-硬件密钥保护。
+实现限制 JSON payload、候选数量、节点数量、每 IP 连接数、并发 enrollment、控制
+队列和数据队列，并拒绝不受支持的方向与类型。运行时计数器覆盖会话、路径包、丢包、
+enrollment/续期、P2P 结果、路径切换和队列高水位。
 
-## 不在范围内
+这些边界不能防御大规模带宽或 CPU DDoS。公网部署仍需防火墙和外部 UDP 速率限制。
+内建 HTTP `/metrics` 只导出无标签计数器和 gauge，并限制并发、请求大小与读取时间；
+它尚未通过发布门禁，只能绑定可信管理接口，不能暴露到不可信网络。
 
-- 被攻破或恶意的 Relay；
-- 被攻破的 Edge 操作系统、管理员账户或应用；
-- 同租户节点之间的访问控制和隔离；
-- 应用层机密性、完整性或身份认证；
-- 抗大规模分布式拒绝服务；
-- 匿名性、流量隐藏或抗流量分析；
-- DNS、默认路由、Internet 出口和 NAT 穿透。
+## 明确不保护
 
-## 部署最低要求
+- 恶意或被攻破的协调服务、节点 CA、可信 Relay；
+- 被攻破的 Agent 操作系统、管理员或应用；
+- 同租户节点之间的访问控制；
+- Relay 回退包的端到端机密性；
+- 匿名性、流量隐藏和抗流量分析；
+- 大规模分布式拒绝服务；
+- NAT 穿透、Internet 出口、DNS、默认路由或子网路由。
 
-1. 使用受控 CA 签发且 SAN 正确的服务端证书，建立续期和私钥轮换流程。
-2. 每节点生成独立 token，限制文件 ACL，禁止通过聊天、Issue 或命令行传递。
-3. 防火墙只开放实际使用的 UDP listeners，并限制管理面来源。
-4. 将一个 Relay 注册表视为一个信任域；隔离不同组织时使用不同 Relay/overlay。
-5. 监控鉴权失败、连接数、队列/transport 丢包和异常重连，不采集包体；当前内建
-   原子计数覆盖背压丢包，其他分类需从脱敏结构化日志聚合。
-6. 及时升级受支持版本，并按 [`SECURITY.md`](../SECURITY.md) 私密报告漏洞。
+安全问题按 [`SECURITY.md`](../SECURITY.md) 私密报告。

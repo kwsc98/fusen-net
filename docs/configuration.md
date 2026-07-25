@@ -1,186 +1,212 @@
 # 配置参考
 
-Fusen Net 0.1 使用严格的版本化 TOML。未知字段、重复字段和无效组合会导致启动
-失败。可以先运行：
+Stellaris `0.3.0-alpha.1` 只接受严格的 schema v2 TOML。Server、Agent 和静态节点表
+顶层都必须是 `version = 2`；未知字段、重复字段、缺失 section 和其他版本直接拒绝。
 
 ```bash
-fusen-net config check --config /etc/fusen-net/server.toml
-fusen-net config check --config /etc/fusen-net/agent.toml
+stellaris config check --config /etc/stellaris/server.toml
+stellaris config check --config /etc/stellaris/agent.toml
+stellaris config check --config /etc/stellaris/nodes.toml
 ```
 
-## 优先级和路径
-
-最终值按以下顺序覆盖：
-
-```text
-安全默认值 < TOML < FUSEN_* 环境变量 < CLI 参数
-```
-
-运行命令用 `--config` 选择基线配置，并可通过下文列出的参数覆盖普通值和秘密
-**文件路径**。不提供 `--token` 或明文秘密环境变量，秘密内容本身不能通过
-环境变量或命令行传递。
-
-TOML、环境变量和 CLI 中的相对资源路径均以配置文件所在目录为基准，不以当前
-工作目录为基准。建议生产环境全部使用绝对路径。
+运行命令只支持 `--config PATH`，也可设置 `STELLARIS_CONFIG`。没有字段级 CLI 或
+环境变量覆盖，没有 backend 选择，也没有明文 token 参数。相对资源路径一律以配置
+文件所在目录为基准。
 
 ## Server
 
 ```toml
-version = 1
+version = 2
 
-[server]
+[network]
 overlay_cidr = "10.88.0.0/24"
 mtu = 1100
-nodes_file = "nodes.example.toml"
+
+[registry]
+nodes_file = "nodes.toml"
+
+[storage]
+coordinator_state_file = "state/coordinator-state.json"
 
 [tls]
-server_name = "localhost"
-cert_file = "certs/server.pem"
-key_file = "certs/server-key.pem"
+server_name = "stellaris.example.com"
+service_cert_file = "certs/deployment-server.pem"
+service_key_file = "certs/deployment-server-key.pem"
+node_ca_cert_file = "state/node-ca.pem"
+node_ca_key_file = "state/node-ca-key.pem"
 
-[[listeners]]
-backend = "quinn"
-bind = "0.0.0.0:7000"
+[listeners]
+enrollment = "0.0.0.0:7000"
+control = "0.0.0.0:7001"
+relay = "0.0.0.0:7002"
 
-[[listeners]]
-backend = "s2n"
-bind = "0.0.0.0:7001"
+[limits]
+max_nodes = 256
+max_connections_per_ip = 8
+max_pending_handshakes = 64
+queue_capacity = 256
 
-[[listeners]]
-backend = "gm-quic"
-bind = "0.0.0.0:7002"
+# [observability]
+# metrics_bind = "127.0.0.1:9100"
 ```
 
-| 字段 | 必需 | 说明 |
+### Server 字段
+
+| 字段 | 必需 | 规则 |
 | --- | --- | --- |
-| `version` | 是 | 配置 schema 版本，0.1 只接受整数 `1` |
-| `server.overlay_cidr` | 是 | 单个 IPv4 CIDR；不得包含节点注册地址冲突 |
-| `server.mtu` | 否 | IPv4 包上限，默认 `1100`，v1 有效范围 576..=1100 |
-| `server.nodes_file` | 是 | 静态节点注册表路径 |
-| `tls.server_name` | 是 | Relay 对该证书提供服务的 SNI 名称；连接时必须出现在证书 SAN 中 |
-| `tls.cert_file` | 是 | PEM 服务端证书链；叶证书在前，后接中间证书，通常不包含根证书 |
-| `tls.key_file` | 是 | 与叶证书匹配的 PEM 私钥；匹配关系在 Server 启动时验证 |
-| `listeners[].backend` | 是 | `quinn`、`s2n` 或 `gm-quic` |
-| `listeners[].bind` | 是 | UDP SocketAddr；同一地址和端口不能重复 |
+| `version` | 是 | 固定为整数 `2` |
+| `network.overlay_cidr` | 是 | IPv4 CIDR，prefix 为 `/8` 至 `/30` |
+| `network.mtu` | 否 | 默认 `1100`，范围 `576..=1100` |
+| `registry.nodes_file` | 是 | schema v2 静态节点表；只在启动时加载 |
+| `storage.coordinator_state_file` | 是 | `server init` 创建的持久协调状态 |
+| `tls.server_name` | 是 | service certificate 的 TLS 名称；ASCII DNS 名或可用 IP |
+| `tls.service_cert_file` | 是 | 部署服务证书 PEM；叶证书在前 |
+| `tls.service_key_file` | 是 | 与服务证书匹配的私钥 PEM |
+| `tls.node_ca_cert_file` | 是 | `server init` 创建的节点 CA 证书 |
+| `tls.node_ca_key_file` | 是 | `server init` 创建的节点 CA 私钥 |
+| `listeners.enrollment` | 是 | 仅注册协议的 IPv4 UDP bind |
+| `listeners.control` | 是 | 节点 mTLS 控制协议的 IPv4 UDP bind |
+| `listeners.relay` | 是 | 节点 mTLS Relay 协议的 IPv4 UDP bind |
+| `limits.max_nodes` | 否 | 默认/最大 `256`，必须非零且覆盖节点表全部条目 |
+| `limits.max_connections_per_ip` | 否 | 默认 `8`；运行时必须在 `1..=max_nodes` |
+| `limits.max_pending_handshakes` | 否 | 默认 `64`；配置范围 `2..=1024`，独立于 `max_nodes` 以容纳续期重叠和原子撤销事件 |
+| `limits.queue_capacity` | 否 | 默认 `256`，必须在 `1..=max_nodes` |
+| `observability.metrics_bind` | 否 | 可选 Prometheus HTTP `/metrics` IPv4 bind；不得暴露到不可信网络，exporter 尚未通过发布门禁 |
 
-Server 至少需要一个 listener。配置了未编译进二进制的后端时必须启动失败，不能
-回退到其他后端。
+三个 listener 必须使用非零端口，且 bind 不得冲突。相同 IP/端口冲突；通配地址与
+同端口的具体地址也冲突。它们都是 Quinn UDP endpoint，不表示三种传输后端。
 
-可覆盖的 Server 环境变量：
+`service_cert_file`/`service_key_file` 属于部署 TLS 身份，用在全部三个 Server
+listener。enrollment 只要求客户端验证 Server；control 和 Relay 还要求客户端出示
+节点 CA 签发的有效证书。节点 CA 不是部署服务证书的签发 CA。
 
-```text
-FUSEN_CONFIG
-FUSEN_OVERLAY_CIDR
-FUSEN_MTU
-FUSEN_NODES_FILE
-FUSEN_CERT_FILE
-FUSEN_KEY_FILE
-FUSEN_SERVER_NAME
-FUSEN_BACKEND
-FUSEN_BIND
+### 初始化与启动
+
+```bash
+stellaris server init --config /etc/stellaris/server.toml
+stellaris server run --config /etc/stellaris/server.toml
 ```
 
-`FUSEN_BACKEND` 和 `FUSEN_BIND` 必须同时提供；二者会将配置文件中的 listener
-列表整体替换为一个 listener。复杂的多 listener 配置请使用配置文件。对应 CLI
-参数为 `--overlay-cidr`、`--mtu`、`--nodes-file`、`--cert-file`、`--key-file`、
-`--server-name`、`--backend` 和 `--bind`，优先级高于同名环境变量。
+`server init` 读取并验证 Server 配置、部署服务文件和节点表，然后创建
+`node_ca_cert_file`、`node_ca_key_file` 与 `coordinator_state_file`。命令不覆盖也不
+轮换现有状态。唯一可恢复的中断状态是：节点 CA certificate/key 同时存在且通过严格
+证书、私钥、匹配关系和权限校验，而 `coordinator_state_file` 缺失；重试会保留该 CA
+并创建空协调状态。其他单文件、损坏、不匹配、权限不安全或已有协调状态的组合均拒绝。
 
-## 节点注册表
+`server run` 不会隐式初始化。节点 CA、协调状态缺失、损坏、互不匹配或权限不安全时
+必须失败。静态节点表只在启动时读取；修改 `enabled`、轮换 token 或变更地址后必须
+重启 Server。本阶段没有配置 reload 或管理 API。
+
+## 静态节点表
 
 ```toml
-version = 1
+version = 2
 
 [[nodes]]
 id = "edge-a"
 ipv4 = "10.88.0.2"
-token_sha256 = "sha256:<64 lowercase hex characters>"
+enrollment_token_sha256 = "sha256:<64 lowercase hex characters>"
 enabled = true
 
 [[nodes]]
 id = "edge-b"
 ipv4 = "10.88.0.3"
-token_sha256 = "sha256:<64 lowercase hex characters>"
+enrollment_token_sha256 = "sha256:<64 lowercase hex characters>"
 enabled = true
 ```
 
-- `id`、`ipv4` 和 `token_sha256` 必须唯一；`enabled` 省略时默认为 `true`。
-- 地址必须是 Server overlay CIDR 内可分配的单播 IPv4 地址，不能是网络地址或
-  广播地址。
-- `token_sha256` 是 token 文件内容的 SHA-256 摘要，不是明文 token。
-- 重复在线 node ID 采用 `reject-new`，不会踢掉旧连接。
+- 最多 256 项；`id`、`ipv4` 和 token 摘要分别唯一。
+- `id` 长度为 1..=63；首字符为 ASCII 字母或数字，后续还可使用 `.`, `_`, `-`。
+- 地址必须是 Server overlay CIDR 内可用的单播 host，不能是网络或广播地址。
+- `enabled` 省略时为 `true`。禁用项不能 enrollment 或建立新的 control/Relay 会话；
+  它是可恢复的启动时准入开关，不等同于不可逆的 `PeerRevoked` tombstone。
+- 表内只保存 enrollment token 的 `sha256:<hex>` 摘要，不保存明文。
 
-生成 token 时文件以安全权限原子创建；已存在的输出路径不会被覆盖：
+生成 token：
 
 ```bash
-fusen-net token generate --node-id edge-a --output /etc/fusen-net/edge-a.token
+stellaris token generate \
+  --node-id edge-a --output /etc/stellaris/edge-a.token
 ```
 
-命令向终端输出 node ID 和可写入注册表的 SHA-256 摘要，不输出明文 token。
-摘要是对 token 文件中去除末尾换行后的完整 `fsn1_...` 字符串计算 SHA-256。
+命令用 CSPRNG 创建 32-byte 随机值，编码为 `stl2_<base64url-no-pad>`，以安全权限
+创建并 fsync 文件，然后打印 `node_id` 和 `enrollment_token_sha256`。输出路径已存在
+时拒绝覆盖。成功 enrollment 后 token 在协调状态中标记为已消费；它不是长期会话
+凭据。
 
 ## Agent
 
 ```toml
-version = 1
+version = 2
 
 [agent]
 node_id = "edge-a"
-server_addr = "203.0.113.10:7000"
-backend = "quinn"
-server_name = "relay.example.com"
-ca_file = "certs/ca.pem"
-token_file = "secrets/edge-a.token"
-tun_name = "fusen0"
+tun_name = "stellaris0"
+
+[coordinator]
+enrollment_addr = "203.0.113.10:7000"
+control_addr = "203.0.113.10:7001"
+relay_addr = "203.0.113.10:7002"
+server_name = "stellaris.example.com"
+deployment_ca_file = "certs/deployment-ca.pem"
+
+[identity]
+directory = "state/edge-a"
+enrollment_token_file = "secrets/edge-a.token"
+
+[p2p]
+bind = "0.0.0.0:7100"
+idle_timeout_secs = 300
+
+# [observability]
+# metrics_bind = "127.0.0.1:9101"
 ```
 
-| 字段 | 必需 | 说明 |
+### Agent 字段
+
+| 字段 | 必需 | 规则 |
 | --- | --- | --- |
-| `version` | 是 | 配置 schema 版本，必须为 `1` |
-| `agent.node_id` | 是 | 与注册表完全一致，长度 1..=63，首字符为 ASCII 字母或数字 |
-| `agent.server_addr` | 是 | Relay UDP `IP:port`；0.1 配置解析不接受主机名 |
-| `agent.backend` | 是 | 必须匹配目标 listener 的后端 |
-| `agent.server_name` | 是 | TLS SNI 和 SAN 校验名，不从 `server_addr` 猜测 |
-| `agent.ca_file` | 是 | 含一个或多个受信任 CA 证书的 PEM bundle；没有 insecure 模式 |
-| `agent.token_file` | 是 | 仅含生成器产生的 `fsn1_<base64url>` 值及末尾换行 |
-| `agent.tun_name` | 否 | 请求的平台接口名；平台不支持固定名称时可忽略并记录实际名称 |
+| `version` | 是 | 固定为整数 `2` |
+| `agent.node_id` | 是 | 必须与静态节点表及签名证书身份完全一致 |
+| `agent.tun_name` | 否 | 1..=63 个非 NUL bytes；平台可能忽略固定名称 |
+| `coordinator.enrollment_addr` | 是 | enrollment listener 的可达 IPv4 UDP 地址 |
+| `coordinator.control_addr` | 是 | control listener 的可达 IPv4 UDP 地址 |
+| `coordinator.relay_addr` | 是 | Relay listener 的可达 IPv4 UDP 地址 |
+| `coordinator.server_name` | 是 | 三条 Server TLS 连接使用的 SNI/SAN 校验名 |
+| `coordinator.deployment_ca_file` | 是 | 信任部署 service certificate 的 CA PEM bundle |
+| `identity.directory` | 是 | 私有节点密钥、证书、节点 CA 和待完成请求的持久目录 |
+| `identity.enrollment_token_file` | 首次注册时 | `stl2_` token 文件；已有有效 identity 时可省略，证书失效后重新注册需提供新 token |
+| `p2p.bind` | 是 | Quinn Hybrid endpoint 的 IPv4 UDP bind |
+| `p2p.idle_timeout_secs` | 否 | 默认 `300`，运行时允许 `30..=3600` 秒 |
+| `observability.metrics_bind` | 否 | 可选 Prometheus HTTP `/metrics` IPv4 bind；不得暴露到不可信网络，exporter 尚未通过发布门禁 |
 
-可覆盖的 Agent 环境变量：
+Agent 配置不包含 overlay CIDR、overlay IP 或 MTU。首次 enrollment 和每次
+`ControlWelcome` 都由协调服务提供权威网络值，Agent 将其与已安装签名身份交叉校验。
 
-```text
-FUSEN_CONFIG
-FUSEN_NODE_ID
-FUSEN_SERVER_ADDR
-FUSEN_BACKEND
-FUSEN_SERVER_NAME
-FUSEN_CA_FILE
-FUSEN_TOKEN_FILE
-FUSEN_TUN_NAME
-```
-
-不存在 `FUSEN_TOKEN` 或 `--token`。对应 CLI 参数为 `--node-id`、
-`--server-addr`、`--backend`、`--server-name`、`--ca-file`、`--token-file` 和
-`--tun-name`。日志级别使用 `RUST_LOG`，但不得通过
-trace 日志泄露控制 payload 或包体。
+`identity.directory` 不存在时由 Agent 安全创建，并在本地生成 P-256 私钥；私钥不会
+上传。enrollment 成功后原子安装节点证书和节点 CA。证书续期必须沿用同一公钥，新的
+control/Relay 会话建立后替换旧会话；P2P socket 不重新绑定。
 
 ## 文件权限
 
-在 Unix 上，token 文件和 TLS 私钥不能给 group/other 任何权限，通常应为
-`0600`；不安全权限必须导致 `config check` 和启动失败。证书、CA 和仅含摘要的
-节点注册表可以按部署需要设为 `0644` 或更严格。
+Unix 上，service 私钥、节点 CA 私钥、协调状态、enrollment token 和 Agent identity
+目录必须由当前 effective UID 所有，并且 group/other 无任何权限。通常秘密文件为
+`0600`、identity 目录为 `0700`。证书、部署 CA 和只含摘要的节点表可以按部署需要
+使用 `0644` 或更严格权限。
 
-Windows 上的 token 和私钥 ACL 只允许文件所有者、Administrators 和 SYSTEM。
-`config check` 和启动过程通过 Windows PowerShell 读取 ACL；所有者不属于这些
-主体，存在授权给其他主体的 Allow 规则，或 ACL 无法读取时，配置直接失败。
+Windows 上的秘密 ACL 只允许所有者、Administrators 和 SYSTEM；无法读取 ACL 或
+出现其他 Allow 主体时校验失败。macOS/Windows 当前仍是编译通过、运行未验证状态，
+不能把权限检查存在解释为平台发布支持。
 
-## 校验规则
+## `config check` 边界
 
-`config check` 检查 TOML schema、路径解析、文件存在性、平台秘密文件权限、CIDR、
-MTU、节点唯一性、token 摘要格式、listener 冲突以及所选后端是否编译。对于证书、
-CA 和私钥，它只确认普通文件中存在相应的 PEM BEGIN 标记；不会完整解析 PEM/DER、
-验证证书链、有效期、私钥匹配或 SAN。
+`config check` 校验 TOML 类型、版本、未知字段、路径解析、文件存在性、基础 PEM
+marker、token 格式、静态节点唯一性、CIDR/MTU、listener 冲突和受支持的秘密权限。
+它不会：
 
-三个后端在创建 endpoint 时读取完整 `cert_file` 链和 `ca_file` bundle，并解析证书及
-私钥；Server 证书/私钥不匹配会使启动失败。证书链信任、有效期以及 Agent
-`server_name` 对 SAN 的校验发生在 TLS 握手时。因此 `config check` 成功不等于 TLS
-配置可用。该命令不建立网络连接、创建 TUN 或修改路由，成功时只打印配置类型和
-路径，不打印秘密内容。
+- 创建或修改节点 CA、协调状态、Agent identity、TUN 或路由；
+- 建立网络连接；
+- 完整验证证书链、有效期、SAN 或证书/私钥匹配；
+- 证明 UDP 可达、P2P 可达或真实 TUN 门禁已通过。
+
+因此校验成功只说明输入结构可接受，不等于运行时 TLS 和网络可用。

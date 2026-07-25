@@ -1,4 +1,4 @@
-# Fusen Net qconnection fork
+# Stellaris qconnection fork
 
 This directory contains a minimally patched copy of `qconnection` 0.4.0 from
 crates.io.
@@ -44,7 +44,7 @@ panicking or silently ignoring the frame. Stateless Reset transitions the
 connection to draining without using the upstream `todo!` path.
 
 Focused unit tests verify FIFO Datagram encoding, full dispatch queue failure,
-and Stateless Reset state transition. Fusen Net's backend transport contract
+and Stateless Reset state transition. Stellaris's backend transport contract
 also tests bidirectional, empty, and 1100-byte Datagram delivery over gm-quic.
 
 This fork must be removed when an upstream release includes an equivalent

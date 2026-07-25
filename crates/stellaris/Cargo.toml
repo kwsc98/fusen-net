@@ -1,0 +1,47 @@
+[package]
+name = "stellaris"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core protocol and runtime for the Stellaris QUIC overlay network"
+publish = false
+
+[features]
+default = ["backend-quinn"]
+backend-quinn = ["dep:quinn", "dep:rustls"]
+backend-s2n = ["dep:s2n-quic"]
+backend-gm-quic = ["dep:gm-quic", "dep:rustls"]
+all-backends = ["backend-quinn", "backend-s2n", "backend-gm-quic"]
+
+[dependencies]
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+futures.workspace = true
+gm-quic = { workspace = true, optional = true }
+ipnet.workspace = true
+libc.workspace = true
+pem.workspace = true
+quinn = { workspace = true, optional = true }
+rand.workspace = true
+rcgen.workspace = true
+rustls = { workspace = true, optional = true }
+s2n-quic = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tun.workspace = true
+uuid.workspace = true
+x509-parser.workspace = true
+
+[lints]
+workspace = true

@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
 
       - name: Install Rust 1.97.0
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -40,6 +42,64 @@ jobs:
           test -f Cargo.lock
           cargo metadata --locked --format-version 1 > /dev/null
 
+      - name: Check patch whitespace
+        shell: bash
+        env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          if [[ -n "$PULL_REQUEST_BASE" ]]; then
+            git diff --check "$PULL_REQUEST_BASE"...HEAD
+          elif [[ "$PUSH_BASE" =~ ^[0-9a-f]{40}$ && ! "$PUSH_BASE" =~ ^0+$ ]] \
+            && git cat-file -e "${PUSH_BASE}^{commit}" 2>/dev/null; then
+            git diff --check "$PUSH_BASE" HEAD
+          elif git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^ HEAD
+          else
+            git diff --check
+          fi
+
+      - name: Check local Markdown links
+        shell: bash
+        run: |
+          ruby <<'RUBY'
+          require "pathname"
+          require "uri"
+
+          root = Pathname.pwd.expand_path
+          failures = []
+          markdown_files = `git ls-files -z -- '*.md'`.split("\0")
+          link_pattern = /!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))/
+
+          markdown_files.each do |source|
+            File.read(source).scan(link_pattern) do |bracketed, plain|
+              target = bracketed || plain
+              next if target.empty? || target.start_with?("#")
+              next if target.match?(/\A(?:[a-z][a-z0-9+.-]*:|\/\/)/i)
+
+              encoded_path = target.split("#", 2).first.split("?", 2).first
+              next if encoded_path.empty?
+
+              begin
+                relative_path = URI::DEFAULT_PARSER.unescape(encoded_path)
+              rescue URI::InvalidURIError
+                failures << "#{source}: invalid local link #{target.inspect}"
+                next
+              end
+
+              destination = Pathname.new(source).dirname.join(relative_path).expand_path
+              unless destination == root || destination.to_s.start_with?("#{root}#{File::SEPARATOR}")
+                failures << "#{source}: local link escapes the repository: #{target}"
+                next
+              end
+              failures << "#{source}: missing local link target #{target}" unless destination.exist?
+            end
+          end
+
+          abort failures.join("\n") unless failures.empty?
+          puts "validated local links in #{markdown_files.length} Markdown files"
+          RUBY
+
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -48,6 +108,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-features --locked
+
+      - name: Run protocol decoder fuzz smoke
+        run: >-
+          cargo test -p stellaris --lib --locked
+          protocol::tests::arbitrary_input_is_handled_without_panicking -- --exact
 
       - name: Test vendored transport patches
         shell: bash
@@ -67,7 +132,7 @@ jobs:
         run: cargo doc --workspace --all-features --no-deps --locked
 
   backend-features:
-    name: Backend / ${{ matrix.feature }}
+    name: Transport compile / ${{ matrix.feature }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -90,12 +155,12 @@ jobs:
 
       - name: Check core backend in isolation
         run: >-
-          cargo check -p fusen-net --all-targets --locked
+          cargo check -p stellaris --all-targets --locked
           --no-default-features --features ${{ matrix.feature }}
 
       - name: Check CLI backend in isolation
         run: >-
-          cargo check -p fusen-net-cli --all-targets --locked
+          cargo check -p stellaris-cli --all-targets --locked
           --no-default-features --features ${{ matrix.feature }}
 
   native-build:
@@ -124,12 +189,13 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Build all transports
+      - name: Build the Quinn v2 runtime
         run: >-
-          cargo build -p fusen-net-cli --bin fusen-net --release --locked
-          --target ${{ matrix.target }} --features all-backends
+          cargo build -p stellaris-cli --bin stellaris --release --locked
+          --target ${{ matrix.target }} --no-default-features --features backend-quinn
 
-      - name: Run platform unit and integration tests
+      - name: Run Linux unit and integration tests
+        if: runner.os == 'Linux'
         run: >-
-          cargo test --workspace --all-features --locked
+          cargo test --workspace --locked --no-default-features --features backend-quinn
           --target ${{ matrix.target }}
