@@ -12,7 +12,9 @@ Unverified。文档中的“当前”、“已实现”和“已验证”是不�
 
 本页是第一方文档的统一目录。开始设计或实现改造前，先阅读
 [`documentation-workflow.md`](documentation-workflow.md)，并从下表找到本次变更的
-权威文档。若两份文档冲突，不按“更新时间较新”猜测，应按权威边界修正文档。
+权威文档。使用 AI 参与开发时，还必须先完整阅读
+[`ai-iteration-playbook.md`](ai-iteration-playbook.md)。若两份文档冲突，不按“更新时间
+较新”猜测，应按权威边界修正文档。
 
 ## 阅读路径
 
@@ -23,6 +25,7 @@ Unverified。文档中的“当前”、“已实现”和“已验证”是不�
 | 部署或排障 | [`configuration.md`](configuration.md) -> [`deployment.md`](deployment.md) -> [`troubleshooting.md`](troubleshooting.md) |
 | 评审下一次改造 | [`design-overview.md`](design-overview.md) -> [`adr/0004-durable-node-identity-and-address-leases.md`](adr/0004-durable-node-identity-and-address-leases.md) -> [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
 | 调研现代方案 | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) -> [`design-overview.md`](design-overview.md) |
+| 使用 AI 开始一次迭代 | [`../AGENTS.md`](../AGENTS.md) -> [`ai-iteration-playbook.md`](ai-iteration-playbook.md) -> [`documentation-workflow.md`](documentation-workflow.md) -> 本次目标设计/ADR/Gate |
 | 参与开发或发布 | [`documentation-workflow.md`](documentation-workflow.md) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`releasing.md`](releasing.md) |
 
 ## 状态模型
@@ -74,6 +77,7 @@ Verified 状态。
 | --- | --- | --- |
 | 文档状态模型、目录和冲突处理 | [`README.md`](README.md) | Current process |
 | 改造分级、设计审批和文档影响矩阵 | [`documentation-workflow.md`](documentation-workflow.md) | Current process |
+| 单人使用 AI 的状态重建、切片、自动提交和交接规则 | [`ai-iteration-playbook.md`](ai-iteration-playbook.md) | Current process；不保存当前进度副本 |
 | 项目入口和快速开始 | [`../README.md`](../README.md) | Current |
 | 当前系统组件与数据路径 | [`architecture.md`](architecture.md) | Current v2 |
 | 当前线格式、消息方向和 ALPN | [`protocol.md`](protocol.md) | Current v2，唯一线协议规范 |
@@ -107,6 +111,8 @@ Verified 状态。
 ```text
 README / design-overview        入口与状态摘要
         |
+        +-- ai-iteration-playbook  AI 协作执行纪律
+        +-- documentation-workflow 改造分级与生命周期
         +-- architecture        当前组件和运行边界
         +-- protocol            当前线协议
         +-- configuration       当前 CLI/schema
