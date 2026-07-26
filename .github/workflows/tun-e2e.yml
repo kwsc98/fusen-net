@@ -30,5 +30,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.97.0
+      - name: Verify disposable root runner
+        shell: bash
+        run: |
+          test "$(id -u)" -eq 0 || {
+            echo "real-TUN workflow requires a disposable runner service running as root" >&2
+            exit 1
+          }
       - name: Run real TUN scenarios
         run: bash tests/e2e/run-real-tun.sh linux "${{ inputs.scenario }}"

@@ -1,5 +1,8 @@
 # 安全模型
 
+> **文档适用性：Current；适用范围：v2；设计评审状态：N/A；ADR 决策状态：N/A；
+> 交付状态：Implemented；验证状态：Unverified；发布状态：Unreleased。**
+
 本文说明 Stellaris `0.3.0-alpha.1` 保护什么、信任什么以及明确不保护什么。它不是
 安全审计报告。实现仍未通过完整恶意输入、真实 TUN、故障注入和资源 soak 门禁，
 部署者不得把 alpha 用于关键生产流量。
@@ -27,9 +30,11 @@ Stellaris 有两个独立的 CA 边界：
 2. **节点 CA**由 `stellaris server init` 创建。它签发 24 小时节点证书，用于
    control/Relay 客户端认证和节点间 P2P mTLS。
 
-协调服务、节点 CA 和可信 Relay 都属于首版信任边界。节点 CA 或协调服务被攻破后，
-攻击者可以签发或发布伪造节点身份。部署 service 私钥被攻破可冒充 Server endpoint；
-结合 enrollment token 泄露可能取得节点证书。
+协调服务、节点 CA 和可信 Relay 都属于首版信任边界。完整 Server（在线节点 CA 私钥
+加授权状态）失陷后可以签发并授权任意节点。只泄露 CA 私钥时，攻击者能签发结构有效
+的节点证书，但当前授权 SPKI 和 descriptor 仍是额外约束；系统仍不把 CA 或协调状态
+单独失陷视为受保护场景。部署 service 私钥被攻破可冒充 Server endpoint；结合
+enrollment token 泄露可能取得节点证书。
 
 > **Relay 不提供端到端机密性。** P2P 路径由两个 Agent 之间的 QUIC mTLS 保护；
 > Relay 回退路径在 Server 上解密，因此 Relay 可以看到完整 overlay IPv4 包、源/目标、
@@ -42,6 +47,10 @@ Stellaris 有两个独立的 CA 边界：
   表只保存 SHA-256 摘要，并使用常量时间比较。
 - token 仅在已验证的部署 TLS 连接内发送。Server 成功持久提交签发结果后原子标记
   token 已消费；相同持久 enrollment 请求可幂等重试，其他重用拒绝。
+- 未消费 token 是 enrollment 的唯一客户端准入秘密；部署 service certificate 只让
+  Agent 认证 Server，并不向 Server 认证 Agent。攻击者只要先取得 token，就能提交自己
+  的 CSR 并抢先绑定攻击者 SPKI，不需要同时窃取 service 私钥。因此 token 泄露必须在
+  首次成功使用前轮换，不能等待证书侧告警。
 - Agent 在私有 identity 目录中生成 P-256 私钥并用 CSR 证明持有它。私钥不得上传。
 - Server 从静态注册表覆盖 node ID 和 overlay IPv4，并禁止 CSR 请求 CA 能力或其他
   身份。节点证书把 node ID、overlay IP、公钥和用途放入签名内容。
@@ -86,6 +95,11 @@ Server，并由新私钥使用新 token 完成 enrollment；新 enrollment 提�
 - 每个出站包只选择一个路径。P2P send 失败的当前包不得补发到 Relay，避免 Stellaris
   主动制造重复包；后续包回退 Relay。
 
+当前 host candidate 枚举尚无门禁证明已经排除 Agent 的 TUN/overlay 地址。因此
+`P2PReady` 或 P2P 计数只证明节点间 QUIC 已建立，不能单独证明 underlay 绕过 Relay。
+在候选过滤和真实路由证据完成前，“LAN 直连不经过 Server 数据面”仍是设计目标，
+不是已验证的安全或拓扑属性。
+
 QUIC Datagram 自身允许丢包、乱序和重复。Stellaris 不提供 IP 包重传或排序；应用
 需要可靠性时应在 overlay 上运行 TCP 或其他可靠协议。
 
@@ -94,6 +108,10 @@ QUIC Datagram 自身允许丢包、乱序和重复。Stellaris 不提供 IP 包�
 节点 CA、协调状态、Agent 私钥和证书安装采用先写临时文件、fsync、原子替换和目录
 fsync 的持久路径；变更落盘前不得对网络确认。持久写入失败会使协调 store fail-closed，
 避免继续基于未确认内存状态应答。完整故障点注入矩阵尚未达到发布门禁。
+
+v2 没有快照 generation、外部 witness 或旧备份回滚检测。恢复旧协调状态可能重新
+引入旧 token/SPKI 授权，必须只恢复能够证明为最新、且与节点 CA/注册表一致的停服
+备份；无法证明时应重建信任域。
 
 Unix 上，service 私钥、节点 CA 私钥、协调状态、token 和 Agent identity 必须由
 effective UID 所有且 group/other 不可访问。Windows 使用受限 ACL，但 Windows
@@ -120,3 +138,8 @@ enrollment/续期、P2P 结果、路径切换和队列高水位。
 - NAT 穿透、Internet 出口、DNS、默认路由或子网路由。
 
 安全问题按 [`SECURITY.md`](../SECURITY.md) 私密报告。
+
+Proposed v3 的 NodeUID、地址 lease/epoch 和离线 Root/在线 Intermediate CA，以及
+Conditional 多信任域边界见
+[`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md)。这些
+内容不改变当前安全承诺。

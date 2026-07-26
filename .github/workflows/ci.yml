@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -25,6 +26,35 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+
+      - name: Check Pull Request design contract
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "${PR_BASE_SHA}:scripts/check-pr-design-contract.rb" 2>/dev/null; then
+            base_checker_dir="$(mktemp -d)"
+            trap 'rm -rf "${base_checker_dir}"' EXIT
+            git show "${PR_BASE_SHA}:scripts/check-pr-design-contract.rb" \
+              > "${base_checker_dir}/check-pr-design-contract.rb"
+            git show "${PR_BASE_SHA}:scripts/docs_metadata.rb" \
+              > "${base_checker_dir}/docs_metadata.rb"
+            ruby "${base_checker_dir}/check-pr-design-contract.rb"
+            ruby scripts/check-pr-design-contract.rb
+          else
+            echo "::notice::Bootstrapping PR contract enforcement; checker tests still run."
+          fi
+
+      - name: Test Pull Request design contract checker
+        run: ruby scripts/test-pr-design-contract.rb
+
+      - name: Test release evidence checker
+        run: ruby scripts/test-release-evidence.rb
+
+      - name: Test release workflow policy
+        run: ruby scripts/test-release-workflow.rb
 
       - name: Install Rust 1.97.0
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
@@ -61,44 +91,7 @@ jobs:
 
       - name: Check local Markdown links
         shell: bash
-        run: |
-          ruby <<'RUBY'
-          require "pathname"
-          require "uri"
-
-          root = Pathname.pwd.expand_path
-          failures = []
-          markdown_files = `git ls-files -z -- '*.md'`.split("\0")
-          link_pattern = /!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))/
-
-          markdown_files.each do |source|
-            File.read(source).scan(link_pattern) do |bracketed, plain|
-              target = bracketed || plain
-              next if target.empty? || target.start_with?("#")
-              next if target.match?(/\A(?:[a-z][a-z0-9+.-]*:|\/\/)/i)
-
-              encoded_path = target.split("#", 2).first.split("?", 2).first
-              next if encoded_path.empty?
-
-              begin
-                relative_path = URI::DEFAULT_PARSER.unescape(encoded_path)
-              rescue URI::InvalidURIError
-                failures << "#{source}: invalid local link #{target.inspect}"
-                next
-              end
-
-              destination = Pathname.new(source).dirname.join(relative_path).expand_path
-              unless destination == root || destination.to_s.start_with?("#{root}#{File::SEPARATOR}")
-                failures << "#{source}: local link escapes the repository: #{target}"
-                next
-              end
-              failures << "#{source}: missing local link target #{target}" unless destination.exist?
-            end
-          end
-
-          abort failures.join("\n") unless failures.empty?
-          puts "validated local links in #{markdown_files.length} Markdown files"
-          RUBY
+        run: bash scripts/check-docs.sh
 
       - name: Check formatting
         run: cargo fmt --all --check

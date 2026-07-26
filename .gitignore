@@ -6,6 +6,10 @@ target/
 /certs/
 /configs/secrets/
 /configs/certs/
+/configs/state/
+/configs/server.toml
+/configs/agent.toml
+/configs/nodes.toml
 *.token
 *.key
 *-key.pem

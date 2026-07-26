@@ -54,9 +54,13 @@ services:
     secrets:
       - source: agent_ca
         target: agent_ca
+        uid: "0"
+        gid: "0"
         mode: 0444
       - source: agent_token
         target: agent_token
+        uid: "0"
+        gid: "0"
         mode: 0400
     devices:
       - /dev/net/tun:/dev/net/tun

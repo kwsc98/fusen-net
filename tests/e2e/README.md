@@ -5,9 +5,13 @@ self-hosted Linux x86_64 runner. Hosted runners do not provide the privileges
 needed for native TUN, routes, network namespaces, or fault injection.
 
 Required labels are `self-hosted`, `Linux`, `X64`, `stellaris-tun`. Run the
-test process as root. The host needs `/dev/net/tun`, `iproute2`, and `ping`;
-the complete gate also needs `tc`. Do not attach a persistent organization-wide
-runner because repository code executes with network-administration rights.
+test process as root. The host needs `/dev/net/tun`, Rust/Cargo, `ripgrep`,
+`iproute2`, `ping`, and the native compiler/linker dependencies needed by the
+Quinn feature; the complete gate also needs `tc`. Do not attach a persistent
+organization-wide runner because repository code executes with
+network-administration rights.
+The workflow does not call `sudo`: the disposable runner service itself must
+run as UID 0, and an explicit preflight fails before repository tests otherwise.
 
 ## Current executable coverage
 
@@ -25,8 +29,10 @@ Run it with:
 sudo tests/e2e/run-real-tun.sh linux native
 ```
 
-The script uses `Cargo.lock`, builds all features for compile coverage, selects
-the ignored test by exact name, and fails if the expected test does not exist.
+The script uses `Cargo.lock`, builds the real-TUN test with only the Quinn
+runtime feature, selects the ignored test by exact name, and fails if the
+expected test does not exist. All-feature compile coverage remains a separate
+CI/release check.
 
 ## Required complete gate
 

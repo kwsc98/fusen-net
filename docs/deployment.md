@@ -1,8 +1,14 @@
 # 部署指南
 
-本指南面向 Stellaris `0.3.0-alpha.1` 的全新 v2 部署。当前版本未通过完整 Linux
-真实 TUN、故障注入和资源 soak 门禁，只适合隔离测试环境。不要尝试复用任何旧配置、
-状态、token 或节点 identity。
+> **文档适用性：Current；适用范围：v2；设计评审状态：N/A；ADR 决策状态：N/A；
+> 交付状态：Implemented；验证状态：Unverified；发布状态：Unreleased。**
+
+<!-- stellaris-release-status:deployment-status:start -->
+本指南面向 Stellaris `0.3.0-alpha.1` 的全新 v2 部署。当前版本未通过完整 Linux 真实
+TUN、故障注入和资源 soak 门禁，只适合隔离测试环境。
+<!-- stellaris-release-status:deployment-status:end -->
+
+不要尝试复用任何旧配置、状态、token 或节点 identity。
 
 ## 拓扑与端口
 
@@ -20,8 +26,9 @@
 P2P 只使用可直接到达的 IPv4 host candidate，不包含 NAT 打洞。无法直连时流量继续走
 可信 Relay。
 
-Server 不创建 TUN，也不需要 `NET_ADMIN`。Linux Agent 需要 `/dev/net/tun` 和 root
-或 `CAP_NET_ADMIN`。macOS/Windows 当前仅为编译目标，不应按本指南宣称运行支持。
+Server 不创建 TUN，也不需要 `NET_ADMIN`。Linux Agent 需要 `/dev/net/tun`、`iproute2`
+提供的外部 `ip` 命令，以及 root 或 `CAP_NET_ADMIN`。缺少 `ip` 时 TUN 可能创建成功，
+但 overlay 路由安装会失败。macOS/Windows 当前仅为编译目标，不应按本指南宣称运行支持。
 
 ## 准备信任材料
 
@@ -35,22 +42,43 @@ Server 不创建 TUN，也不需要 `NET_ADMIN`。Linux Agent 需要 `/dev/net/t
 service certificate 用于 enrollment、control 和 Relay 三个 listener。节点 CA 由
 `server init` 单独创建，不能用部署 CA 私钥替代，也不要把节点 CA 私钥分发给 Agent。
 
+隔离开发环境可从仓库根目录执行：
+
 ```bash
-install -d -m 0700 /etc/stellaris/secrets /var/lib/stellaris
-stellaris token generate \
-  --node-id edge-a --output /etc/stellaris/secrets/edge-a.token
+bash scripts/generate-dev-tls.sh ./configs/certs stellaris.test
+openssl verify \
+  -CAfile ./configs/certs/deployment-ca.pem \
+  ./configs/certs/deployment-server.pem
 ```
 
-将打印的摘要写入 `nodes.toml`，不要写入 token 明文。Unix 上所有私钥、token 和
-协调状态必须由运行用户所有且 group/other 不可访问。
+helper 会拒绝覆盖现有文件，生成 30 天开发 CA 和 7 天 service certificate，并在返回前
+验证签发链。它不替代生产 PKI；生产部署还必须由 PKI 工具验证 SAN、有效期、leaf-first
+chain 和 cert/key 匹配，且不得把 `deployment-ca-key.pem` 放进 Stellaris Server。
+
+先为 Server 和每个 Agent 创建独立的非登录运行账户。以下名称只是示例；账户创建方式
+由操作系统决定：
+
+```bash
+sudo install -d -o stellaris-server -g stellaris-server -m 0700 \
+  /etc/stellaris/server-secrets /var/lib/stellaris/server
+sudo install -d -o stellaris-agent -g stellaris-agent -m 0700 \
+  /etc/stellaris/agent-secrets /var/lib/stellaris/agent
+sudo -u stellaris-agent stellaris token generate \
+  --node-id edge-a --output /etc/stellaris/agent-secrets/edge-a.token
+```
+
+将打印的摘要写入 Server 的 `nodes.toml`，不要复制 token 明文到 Server。通过安全带外
+通道把 token 文件交给对应 Agent 运行账户。Unix 上所有私钥、token、协调状态和
+identity 目录必须由实际读取它们的 effective UID 所有且 group/other 不可访问。
+service key 应以 `0600` 安装给 `stellaris-server`；配置和公开证书可以只读共享。
 
 ## 初始化 Server
 
 准备好 `server.toml`、节点表和部署 TLS 文件后：
 
 ```bash
-stellaris config check --config /etc/stellaris/server.toml
-stellaris server init --config /etc/stellaris/server.toml
+sudo -u stellaris-server stellaris config check --config /etc/stellaris/server.toml
+sudo -u stellaris-server stellaris server init --config /etc/stellaris/server.toml
 ```
 
 初始化创建节点 CA certificate/key 和空协调状态，且绝不覆盖或轮换已有状态。若进程
@@ -63,29 +91,54 @@ stellaris server init --config /etc/stellaris/server.toml
 启动：
 
 ```bash
-stellaris server run --config /etc/stellaris/server.toml
+sudo -u stellaris-server stellaris server run --config /etc/stellaris/server.toml
 ```
 
-Server 以专用非登录、非 root 用户运行，并只授予配置、注册表、service TLS 和状态
-目录所需权限。服务管理器应限制文件、内存、文件描述符和 UDP 速率；持续配置错误
-不要形成无延迟重启循环。
+`config check`、`server init` 和 `server run` 必须使用同一个 Server effective UID；
+否则初始化生成的节点 CA/状态会因 owner 不匹配而在运行时被拒绝。Server 以专用
+非登录、非 root 用户运行，并只授予配置、注册表、service TLS 和状态目录所需权限。
+服务管理器应限制文件、内存、文件描述符和 UDP 速率；持续配置错误不要形成无延迟
+重启循环。
 
-节点表仅在启动时加载。修改 enabled、地址或 token 摘要后安排 Server 重启。在线
-session 不在快照中，Server 重启会要求节点重新认证。
+节点表仅在启动时加载。修改 enabled 或 token 摘要后安排 Server 重启。地址只允许在
+首次 enrollment 前修改；已有持久 node/IP binding 时原地改地址会使启动 fail-closed，
+v2 没有地址迁移流程。在线 session 不在快照中，Server 重启会要求节点重新认证。
 
 ## 启动 Agent
 
 每个 Agent 使用不同的 node ID、token、identity 目录、overlay 地址注册项和 P2P
 UDP bind：
 
+先用实际 Agent 用户校验：
+
 ```bash
-stellaris config check --config /etc/stellaris/agent.toml
-sudo stellaris agent run --config /etc/stellaris/agent.toml
+sudo -u stellaris-agent stellaris config check --config /etc/stellaris/agent.toml
 ```
+
+普通 `sudo -u stellaris-agent` 不会自动获得 TUN 所需 capability。Linux 上建议由
+systemd 显式授予进程及其路由子进程 `CAP_NET_ADMIN`，最小 service 片段如下：
+
+```ini
+[Service]
+User=stellaris-agent
+Group=stellaris-agent
+ExecStart=/usr/local/bin/stellaris agent run --config /etc/stellaris/agent.toml
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+Restart=on-failure
+```
+
+同时确认该用户可以打开 `/dev/net/tun`。也可以在隔离测试机上让 token 生成、配置校验
+和 Agent 启动全部以 root 运行，但不能中途切换 effective UID；token 和 identity owner
+会不匹配。不要简单给可被其他用户执行的共享二进制设置宽泛 file capability。
 
 首次运行会在 `identity.directory` 创建 P-256 私钥和持久 enrollment 请求。成功后
 安装节点证书及节点 CA；不要删除该目录，也不要在主机间复制。token 是一次性的，
 identity 丢失后不能依靠同一 token 重建节点。
+
+同一个 identity 目录不得同时挂载给两个 Agent 进程或两台主机。v2 没有跨进程
+identity lock；重复运行同一私钥/证书会造成 control incarnation 和路径反复替换。
 
 Agent 从 `ControlWelcome` 取得权威 overlay CIDR 和 MTU，创建 TUN 并安装 overlay
 路由。它不修改默认路由或 DNS。节点 P2P UDP 端口只向需要直连的受控 LAN 开放；
@@ -106,6 +159,46 @@ Relay UDP 端口必须保持可达，以便无 P2P 或断线后的后续包回�
 
 该操作没有宽限期或在线管理 API，应在隔离测试中先演练。禁用节点同样需要修改节点
 表并重启 Server；正式撤销操作接口尚未提供。
+
+## 备份与恢复
+
+当前 v2 没有在线一致快照、快照 generation 或旧备份回滚检测。以下流程是最低操作
+要求，尚未通过完整灾难恢复门禁：
+
+1. 停止 Server，并确认没有进程仍在写协调状态。
+2. 把 `coordinator_state_file`、节点 CA certificate/key、`server.toml`、`nodes.toml`
+   和部署 service TLS 材料作为同一个带时间戳、不可修改的恢复集备份。
+3. 分别停止每个 Agent，再备份其完整 `identity.directory`；不要只复制私钥或
+   `credentials.json`，也不要从一个 Agent 目录拼接另一个目录的文件。
+4. 记录备份对应的 commit、二进制版本、文件哈希、owner/mode 和节点表摘要。备份本身
+   必须加密并限制访问。
+5. 恢复时写入空目录，恢复原 owner/mode，使用同一 release；不得合并不同时点的节点
+   CA 和协调状态，也不得在两台主机同时启动同一 Agent identity。
+6. 先在隔离维护网络中以实际 Server 用户启动并验证状态/注册表一致，再逐个启动 Agent
+   并验证旧 token 没有再次消费、node/IP/SPKI 与备份一致。
+
+若恢复的 Agent leaf 已过期，它无法通过旧 control 会话续期：为该 node 生成新 token，
+更新静态摘要并重启 Server，再把 token 配置给该 Agent 进行 enrollment。该流程复用
+备份中的 operational key；若 Server 当前授权 SPKI 已与备份不同，新 enrollment 会再次
+替换授权 SPKI，必须在维护窗口验证旧凭据拒绝。无法确认 Server/Agent 备份属于同一
+时间点时，不得拼接恢复。
+
+恢复一份结构正确但较旧的协调状态可能恢复旧 token/SPKI 授权；v2 无法自动识别这种
+回滚。只有能够证明是最新的一致备份才能恢复。无法证明时应隔离旧部署并重建整个
+信任域，不能把 `server init` 当修复命令。
+
+## 证书轮换
+
+- **同一部署 CA 下更新 service certificate：**并排写入新 cert/key，严格设置 owner/
+  mode，更新配置路径并重启 Server。当前没有证书热加载。
+- **更换部署 CA：**先让所有 Agent 的 `deployment_ca_file` 同时信任新旧 CA 并重启
+  Agent，再切换 Server service cert/key；全部节点恢复连接后才能移除旧 CA。
+- **节点 leaf：**由 Agent 在有效 control 会话中自动续期，不需要管理员复制证书。
+- **节点 CA：**v2 不支持原地轮换或双节点 CA 信任。节点 CA 到期、泄露或必须替换时，
+  停止部署，重新初始化全新状态并用新 token enrollment 所有 Agent。
+
+service key 或未消费 enrollment token 泄露后应立即隔离受影响 listener/节点并轮换。
+节点 CA 或协调状态疑似泄露时，当前安全边界不提供继续运行保证。
 
 ## 容器
 

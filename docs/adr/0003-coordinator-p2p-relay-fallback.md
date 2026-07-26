@@ -1,6 +1,13 @@
 # ADR 0003：协调服务、按需 P2P 与 Relay 回退
 
-- 状态：Accepted and implemented; verification gates incomplete
+- 文档适用性：Current
+- 适用范围：v2 数据路径
+- 设计评审状态：N/A
+- ADR 决策状态：Accepted
+- 交付状态：Implemented
+- 验证状态：Unverified
+- 发布状态：Unreleased
+- 说明：发布门禁未完成
 - 日期：2026-07-25
 
 ## 背景
@@ -50,9 +57,10 @@ RelayOnly -> Probing -> P2PReady
 
 ### 当前候选范围
 
-当前只发布和拨号可直接到达的 IPv4 host candidate。NAT 映射观察、
-server-reflexive candidate、UDP 打洞和外部 STUN/TURN 不属于本决策的当前实现阶段，
-将在独立 NAT 里程碑中设计和验证。
+当前只发布和拨号语法上可用的 IPv4 host candidate；`host` 类型本身不证明候选来自
+真实 underlay，也不证明两端可以直接到达。排除 TUN/overlay 地址及真实路由证据仍是
+开放门禁。NAT 映射观察、server-reflexive candidate、UDP 打洞和外部 STUN/TURN
+不属于本决策的当前实现阶段，将在独立 NAT 里程碑中设计和验证。
 
 ### 故障语义
 
@@ -64,7 +72,9 @@ server-reflexive candidate、UDP 打洞和外部 STUN/TURN 不属于本决策的
 
 ### 信任边界
 
-- P2P 数据由节点间 QUIC mTLS 保护，不经过 Server 数据面。
+- 使用真实 underlay candidate 的 P2P 数据由节点间 QUIC mTLS 保护，目标是不经过 Server
+  数据面；当前候选过滤和真实路由证据仍是未完成门禁，P2P Ready 指标不能单独证明该
+  拓扑属性。
 - 协调服务和节点 CA 可以签发/发布身份，被攻破后能够冒充节点。
 - Relay 回退是可信中继，能够看到完整 overlay 包和流量元数据。
 - 系统单租户全互通，不提供 ACL 或租户隔离。
@@ -75,5 +85,5 @@ server-reflexive candidate、UDP 打洞和外部 STUN/TURN 不属于本决策的
 证书生命周期、持久状态、连接仲裁和故障测试明显更复杂。
 
 当前剩余门禁由 [`../distributed-network-plan.md`](../distributed-network-plan.md)
-跟踪。在 LAN P2P、无重复包、Linux真实 TUN和资源 soak 全部具备可审计证据前，不能
+跟踪。在 LAN P2P、无重复包、Linux 真实 TUN 和资源 soak 全部具备可审计证据前，不能
 把本 ADR 的实现状态描述为稳定支持。

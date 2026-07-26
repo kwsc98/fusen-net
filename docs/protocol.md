@@ -1,5 +1,8 @@
 # Stellaris 线协议 v2
 
+> **文档适用性：Current；适用范围：v2；设计评审状态：N/A；ADR 决策状态：N/A；
+> 交付状态：Implemented；验证状态：Unverified；发布状态：Unreleased。**
+
 本文是 Stellaris `0.3.0-alpha.1` 唯一的线协议规范。关键字“必须”“不得”“应该”和
 “可以”按 RFC 2119 的约定理解。v2 仍处于 alpha：在 `0.x` 期间可能发生破坏式
 调整，但实现不得协商其他帧版本、ALPN 或降级路径。
@@ -49,6 +52,37 @@ incarnation 和非空候选对应的 epoch 都是非零 `u64`。证书指纹是�
 `sha256:` 加 64 个小写十六进制字符。DER 字段使用规范 base64，不接受等价的非规范
 编码。单个 CSR 最大 4096 decoded bytes，单张证书最大 6144 decoded bytes，证书链
 为 1 至 3 张。
+
+### JSON 字段规范
+
+下表冻结每种 payload 的完整字段集合。除 `Error.request_id` 外，字段都必须出现；
+`Error.request_id` 可以省略或为 `null`。表中未列出的字段必须拒绝。`Candidate`、
+`PeerDescriptor` 等嵌套对象同样不得包含额外字段。
+
+| 对象 | 完整字段（JSON 类型） |
+| --- | --- |
+| `Candidate` | `address` (SocketAddr string), `kind` (`"host"` or `"server_reflexive"`), `priority` (`u32`) |
+| `EnrollRequest` | `enrollment_id` (UUID v4 string), `node_id` (string), `enrollment_token` (string), `csr_der_base64` (base64 string) |
+| `EnrollAccepted` | `enrollment_id` (UUID v4 string), `node_id` (string), `overlay_ip` (IPv4 string), `overlay_cidr` (IPv4 CIDR string), `mtu` (`u16`), `certificate_chain_der_base64` (base64 string array), `node_ca_certificate_der_base64` (base64 string), `not_before_unix_seconds` (`u64`), `not_after_unix_seconds` (`u64`) |
+| `ControlWelcome` | `session_id` (UUID v4 string), `incarnation` (`u64`), `overlay_ip` (IPv4 string), `overlay_cidr` (IPv4 CIDR string), `mtu` (`u16`), `certificate_not_after_unix_seconds` (`u64`), `coordinator_time_unix_seconds` (`u64`) |
+| `AnnounceCandidates` | `epoch` (`u64`), `candidates` (`Candidate[]`) |
+| `LookupPeer` | `request_id` (`u64`), `overlay_ip` (IPv4 string) |
+| `PeerRecord` | `request_id` (`u64`), `node_id` (string), `overlay_ip` (IPv4 string), `incarnation` (`u64`), `session_id` (UUID v4 string), `certificate_fingerprint` (string), `certificate_not_after_unix_seconds` (`u64`), `epoch` (`u64`), `candidates` (`Candidate[]`) |
+| `PeerDescriptor` | `node_id` (string), `overlay_ip` (IPv4 string), `incarnation` (`u64`), `session_id` (UUID v4 string), `certificate_fingerprint` (string), `certificate_not_after_unix_seconds` (`u64`), `candidate_epoch` (`u64`), `candidates` (`Candidate[]`) |
+| `ConnectRequest` | `request_id` (`u64`), `overlay_ip` (IPv4 string) |
+| `ConnectPlan` | `request_id` (`u64`), `connection_id` (UUID v4 string), `role` (`"initiator"` or `"responder"`), `peer` (`PeerDescriptor`), `expires_at_unix_seconds` (`u64`) |
+| `RenewCertificate` | `request_id` (`u64`), `csr_der_base64` (base64 string) |
+| `CertificateIssued` | `request_id` (`u64`), `certificate_chain_der_base64` (base64 string array), `not_before_unix_seconds` (`u64`), `not_after_unix_seconds` (`u64`) |
+| `PeerRevoked` | `node_id` (string), `overlay_ip` (IPv4 string), `epoch` (`u64`) |
+| `Error` | optional `request_id` (`u64` or `null`), `code` (error-code string), `message` (string), `retryable` (boolean) |
+| `RelayBind` | `control_session_id` (UUID v4 string), `incarnation` (`u64`) |
+| `RelayAccepted` | `relay_session_id` (UUID v4 string), `mtu` (`u16`), `max_datagram_size` (`u16`) |
+| `RelayReady` | `relay_session_id` (UUID v4 string) |
+| `P2pHello` | `connection_id` (UUID v4 string), `control_session_id` (UUID v4 string), `incarnation` (`u64`), `certificate_fingerprint` (string) |
+| `P2pReady` | `connection_id` (UUID v4 string), `mtu` (`u16`) |
+
+字段的数值范围、相互约束和状态机约束由下文对应章节定义。实现增加、删除、重命名
+字段或改变类型时，必须先以破坏式协议设计变更更新本表；Rust 类型本身不能替代本规范。
 
 ## Enrollment
 
@@ -150,6 +184,10 @@ control 连接完成 mTLS 和静态授权后，Server 首先发送 `ControlWelco
 每个列表最多 16 项，SocketAddr 不得重复。当前运行时只接受 IPv4 `host`：端口非零，
 地址不能是 unspecified、loopback、multicast、broadcast 或 `0.0.0.0/8`。
 `server_reflexive` 是保留枚举值，Agent 不得发布，本阶段路径管理器也不使用它。
+
+v2 线格式不携带接口 provenance，也没有单独禁止候选落入 overlay CIDR。接收方不能
+仅凭 `kind = "host"` 证明该地址来自真实 underlay；当前实现必须通过后续过滤修复和
+真实路由门禁证明 LAN 直连语义。
 
 `PeerRecord` 和 `PeerDescriptor` 由 Server 从同一认证 session 构造，包含 node ID、
 overlay IP、incarnation、session ID、叶证书指纹、证书期限、候选 epoch 和候选列表。

@@ -6,12 +6,14 @@ when you are unsure whether the behavior is exploitable.
 
 ## Supported versions
 
-Until 1.0 reaches a stable release, security fixes are made only on `main` and
-the latest published 0.3 prerelease.
+Until 1.0 reaches a stable release, security fixes are made on `main` and, when
+one exists, the latest published prerelease. The workspace version alone does
+not mean that a release was published.
 
 | Version | Security updates |
 | --- | --- |
-| `main` / latest `0.3.x` prerelease | Yes |
+| `main` | Yes |
+| Published prerelease | None currently |
 | Older prereleases | No |
 | Legacy v1 protocol, configuration, branches, or images | No |
 

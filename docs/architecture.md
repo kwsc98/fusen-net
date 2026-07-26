@@ -1,5 +1,8 @@
 # 架构
 
+> **文档适用性：Current；适用范围：v2；设计评审状态：N/A；ADR 决策状态：N/A；
+> 交付状态：Implemented；验证状态：Unverified；发布状态：Unreleased。**
+
 本文描述 Stellaris `0.3.0-alpha.1` 的破坏式 v2 架构。代码已经包含 Quinn 协调、
 可信 Relay 和局域网 P2P 运行时；这表示实现边界，不表示真实 TUN、故障恢复或
 soak 发布门禁已经通过。实际验证状态见 [`compatibility.md`](compatibility.md)。
@@ -76,7 +79,7 @@ Agent                           Enrollment listener                  Durable sta
 
 Agent 持久化 enrollment ID、token 和 CSR，以便相同请求安全重试。Server 对相同
 enrollment ID、token 和 CSR 返回已提交结果；相同 ID 对应不同内容时拒绝。成功提交
-后 token 被消费。管理员在静态节点表中轮换 token 并重启 Server后，新的 enrollment
+后 token 被消费。管理员在静态节点表中轮换 token 并重启 Server 后，新的 enrollment
 可以替换授权 SPKI，旧私钥及旧证书不能再次建立受授权会话。
 
 ## 控制与 Relay
@@ -100,6 +103,10 @@ Relay 是独立 mTLS 连接：
 
 Agent 启动时在 `p2p.bind` 创建 `HybridQuinnEndpoint`，向协调服务发布可用 IPv4
 host candidate。本阶段不发布或使用 server-reflexive candidate，也不做打洞。
+
+当前枚举发生在 TUN 创建后，且实现尚未排除 overlay/TUN 地址。协议中的 `host` 只
+表示候选类型，不证明接口来源；在完成过滤和真实 underlay 路由门禁前，P2P Ready
+只能证明节点间 QUIC 路径建立，不能证明它没有经 Relay 承载。
 
 当 TUN 包指向尚无 Ready P2P 的目标时：
 
@@ -140,3 +147,9 @@ P2P 的连接不应仅因 control 暂时断开而主动重复包，但其完整�
 
 安全边界见 [`security-model.md`](security-model.md)，线格式见
 [`protocol.md`](protocol.md)。
+
+当前 v2、Proposed v3 和后续方向的关系见 [`design-overview.md`](design-overview.md)。
+不可变 NodeUID、动态地址租约和离线 Root/在线 Intermediate 节点 CA 是 Proposed v3；
+多信任域是 Conditional 后续方向。二者都只在
+[`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) 中记录，
+不属于本 v2 架构。

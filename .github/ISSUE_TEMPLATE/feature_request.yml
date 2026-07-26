@@ -17,6 +17,47 @@ body:
       description: Explain the externally visible behavior, including configuration or protocol effects.
     validations:
       required: true
+  - type: dropdown
+    id: change_class
+    attributes:
+      label: Change class
+      description: Classify this request using docs/documentation-workflow.md; maintainers make the final classification.
+      options:
+        - D2 - public behavior change without an ADR trigger
+        - D3 - ADR-level protocol, identity, state, trust, or architecture change
+        - D4 - release-support or stability-level change
+        - D1 - current-contract bug fix; consider the bug template
+        - Needs maintainer classification
+    validations:
+      required: true
+  - type: textarea
+    id: adr_assessment
+    attributes:
+      label: ADR trigger assessment
+      description: Link the candidate ADR, or write "Not required" and explain why none of the authoritative ADR triggers apply.
+    validations:
+      required: true
+  - type: textarea
+    id: current_evidence
+    attributes:
+      label: Current behavior and evidence
+      description: Link the current authoritative document and provide a reproducible observation, test, or limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance gates
+      description: Define observable outcomes, platforms, topology, failure cases, scale, and duration where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals
+      description: State what this proposal intentionally does not solve.
+    validations:
+      required: true
   - type: textarea
     id: alternatives
     attributes:
@@ -28,9 +69,16 @@ body:
     attributes:
       label: Compatibility impact
       options:
-        - No wire or configuration change
-        - Backward-compatible wire or configuration extension
-        - Breaking wire or configuration change
-        - Unknown
+        - No wire, configuration, or state change
+        - Breaking versioned change; old input is rejected
+        - Documentation or test-only change
+        - Unknown; requires design review
+    validations:
+      required: true
+  - type: textarea
+    id: documents
+    attributes:
+      label: Design and documentation impact
+      description: List the plan, ADR, protocol, configuration, security, compatibility, deployment, and test-gate documents that must change.
     validations:
       required: true

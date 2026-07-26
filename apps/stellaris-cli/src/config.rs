@@ -558,7 +558,8 @@ pub fn validate_node_id(value: &str) -> Result<(), ConfigError> {
 fn validate_server_name(value: &str) -> Result<(), ConfigError> {
     if !is_valid_server_name(value) {
         return Err(ConfigError::Invalid(
-            "server_name must be an ASCII DNS name or unicast IP accepted by TLS".into(),
+            "server_name must be an ASCII DNS name or canonical unicast IPv4 address accepted by TLS"
+                .into(),
         ));
     }
     Ok(())
@@ -568,10 +569,11 @@ fn is_valid_server_name(value: &str) -> bool {
     if value.is_empty() || value.len() > 253 || !value.is_ascii() {
         return false;
     }
-    if let Ok(ip) = value.parse::<IpAddr>() {
-        return !is_invalid_socket_ip(ip, false);
+    if let Ok(address) = value.parse::<Ipv4Addr>() {
+        return address.to_string() == value && !is_invalid_socket_ip(IpAddr::V4(address), false);
     }
-    value.split('.').all(|label| {
+
+    let valid_labels = value.split('.').all(|label| {
         !label.is_empty()
             && label.len() <= 63
             && label
@@ -585,7 +587,12 @@ fn is_valid_server_name(value: &str) -> bool {
                 .as_bytes()
                 .last()
                 .is_some_and(u8::is_ascii_alphanumeric)
-    })
+    });
+    valid_labels
+        && value
+            .rsplit('.')
+            .next()
+            .is_some_and(|label| label.bytes().any(|byte| byte.is_ascii_alphabetic()))
 }
 
 fn validate_ipv4_socket(
@@ -1030,6 +1037,35 @@ mod tests {
             "stl3_{}",
             URL_SAFE_NO_PAD.encode([7_u8; 32])
         )));
+    }
+
+    #[test]
+    fn tls_server_names_reject_ambiguous_numeric_names() {
+        for valid in [
+            "localhost",
+            "stellaris.example.com",
+            "node-1.example",
+            "192.0.2.1",
+        ] {
+            assert!(is_valid_server_name(valid), "expected valid name: {valid}");
+        }
+
+        for invalid in [
+            "bad.name.",
+            "999.999.999.999",
+            "01.02.03.04",
+            "service.123",
+            "123",
+            "0.0.0.0",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+        ] {
+            assert!(
+                !is_valid_server_name(invalid),
+                "expected invalid name: {invalid}"
+            );
+        }
     }
 
     #[cfg(unix)]

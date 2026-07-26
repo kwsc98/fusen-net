@@ -37,7 +37,8 @@ RUN apt-get update \
     && groupadd --system --gid 10001 stellaris \
     && useradd --system --uid 10001 --gid stellaris --no-create-home --home-dir /nonexistent stellaris \
     && mkdir -p /etc/stellaris /var/lib/stellaris \
-    && chown stellaris:stellaris /etc/stellaris /var/lib/stellaris
+    && chown stellaris:stellaris /etc/stellaris /var/lib/stellaris \
+    && chmod 0700 /var/lib/stellaris
 
 COPY --from=builder /src/target/release/stellaris /usr/local/bin/stellaris
 

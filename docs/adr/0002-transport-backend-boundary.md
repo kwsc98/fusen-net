@@ -1,6 +1,14 @@
 # ADR 0002：QUIC 传输抽象边界
 
-- 状态：Superseded for runtime selection by [ADR 0003](0003-coordinator-p2p-relay-fallback.md)
+- 文档适用性：Current
+- 适用范围：v2 传输抽象
+- 设计评审状态：N/A
+- ADR 决策状态：Accepted
+- 替代关系：runtime selection 条款由 [ADR 0003](0003-coordinator-p2p-relay-fallback.md)
+  替代，其余抽象边界继续有效
+- 交付状态：Implemented
+- 验证状态：Unverified
+- 发布状态：Unreleased
 - 日期：2026-07-20
 
 ## 背景

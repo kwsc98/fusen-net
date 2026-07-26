@@ -1,6 +1,13 @@
 # ADR 0001：中心 Relay 基线
 
-- 状态：Superseded by [ADR 0003](0003-coordinator-p2p-relay-fallback.md)
+- 文档适用性：Historical
+- 适用范围：`0.1` 中心 Relay 历史基线
+- 设计评审状态：N/A
+- ADR 决策状态：Superseded
+- 替代关系：[ADR 0003](0003-coordinator-p2p-relay-fallback.md)
+- 交付状态：N/A
+- 验证状态：N/A
+- 发布状态：N/A
 - 日期：2026-07-20
 
 ## 背景

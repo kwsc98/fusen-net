@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   IMAGE_NAMESPACE: ghcr.io/kwsc98/stellaris
@@ -121,46 +125,21 @@ jobs:
         shell: bash
         run: git diff --check HEAD^ HEAD
 
-      - name: Check local Markdown links
+      - name: Check documentation contracts and local links
         shell: bash
+        run: bash scripts/check-docs.sh
+
+      - name: Test documentation governance checkers
         run: |
-          ruby <<'RUBY'
-          require "pathname"
-          require "uri"
+          ruby scripts/test-pr-design-contract.rb
+          ruby scripts/test-release-evidence.rb
+          ruby scripts/test-release-workflow.rb
 
-          root = Pathname.pwd.expand_path
-          failures = []
-          markdown_files = `git ls-files -z -- '*.md'`.split("\0")
-          link_pattern = /!?\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))/
-
-          markdown_files.each do |source|
-            File.read(source).scan(link_pattern) do |bracketed, plain|
-              target = bracketed || plain
-              next if target.empty? || target.start_with?("#")
-              next if target.match?(/\A(?:[a-z][a-z0-9+.-]*:|\/\/)/i)
-
-              encoded_path = target.split("#", 2).first.split("?", 2).first
-              next if encoded_path.empty?
-
-              begin
-                relative_path = URI::DEFAULT_PARSER.unescape(encoded_path)
-              rescue URI::InvalidURIError
-                failures << "#{source}: invalid local link #{target.inspect}"
-                next
-              end
-
-              destination = Pathname.new(source).dirname.join(relative_path).expand_path
-              unless destination == root || destination.to_s.start_with?("#{root}#{File::SEPARATOR}")
-                failures << "#{source}: local link escapes the repository: #{target}"
-                next
-              end
-              failures << "#{source}: missing local link target #{target}" unless destination.exist?
-            end
-          end
-
-          abort failures.join("\n") unless failures.empty?
-          puts "validated local links in #{markdown_files.length} Markdown files"
-          RUBY
+      - name: Check stable release evidence
+        env:
+          IS_STABLE: ${{ steps.release.outputs.is_stable }}
+          RELEASE_COMMIT: ${{ steps.verified_tag.outputs.commit }}
+        run: ruby scripts/check-release-evidence.rb
 
       - name: Run release Clippy gate
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
@@ -331,9 +310,111 @@ jobs:
           path: dist/stellaris-*
           if-no-files-found: error
 
+  publication-preflight:
+    name: Refuse existing release destinations
+    needs: [release-gate, build]
+    runs-on: ubuntu-latest
+    permissions:
+      # Write visibility is required for draft releases; this job only issues GETs.
+      contents: write
+      packages: read
+    steps:
+      - name: Require unused GitHub Release and GHCR tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          release_response="${RUNNER_TEMP}/stellaris-release-preflight.json"
+          if ! release_status="$(
+            curl --silent --show-error --location \
+              --output "$release_response" \
+              --write-out '%{http_code}' \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"; then
+            echo "could not determine whether GitHub Release ${RELEASE_TAG} exists" >&2
+            exit 1
+          fi
+          case "$release_status" in
+            404)
+              echo "GitHub Release ${RELEASE_TAG} is unused"
+              ;;
+            200)
+              release_id="$(jq -r '.id // "unknown"' "$release_response")"
+              asset_names="$(jq -r '[.assets[]?.name] | if length == 0 then "none" else join(", ") end' "$release_response")"
+              echo "GitHub Release ${RELEASE_TAG} already exists (id=${release_id}; assets=${asset_names})" >&2
+              exit 1
+              ;;
+            *)
+              echo "GitHub Release lookup returned unexpected HTTP ${release_status}" >&2
+              exit 1
+              ;;
+          esac
+
+          case "$IMAGE_NAMESPACE" in
+            ghcr.io/*) image_prefix="${IMAGE_NAMESPACE#ghcr.io/}" ;;
+            *) echo "IMAGE_NAMESPACE must use ghcr.io" >&2; exit 1 ;;
+          esac
+
+          for component in server agent; do
+            image_repository="${image_prefix}/${component}"
+            token_response="${RUNNER_TEMP}/stellaris-ghcr-${component}-token.json"
+            if ! token_status="$(
+              curl --silent --show-error --location \
+                --output "$token_response" \
+                --write-out '%{http_code}' \
+                --user "${GITHUB_ACTOR}:${GH_TOKEN}" \
+                --get \
+                --data-urlencode "scope=repository:${image_repository}:pull" \
+                'https://ghcr.io/token'
+            )"; then
+              echo "could not obtain a GHCR read token for ${image_repository}" >&2
+              exit 1
+            fi
+            test "$token_status" = 200 || {
+              echo "GHCR token lookup for ${image_repository} returned HTTP ${token_status}" >&2
+              exit 1
+            }
+            registry_token="$(jq -er '.token | select(type == "string" and length > 0)' "$token_response")" || {
+              echo "GHCR returned no read token for ${image_repository}" >&2
+              exit 1
+            }
+
+            manifest_response="${RUNNER_TEMP}/stellaris-ghcr-${component}-manifest.json"
+            if ! manifest_status="$(
+              curl --silent --show-error --location \
+                --output "$manifest_response" \
+                --write-out '%{http_code}' \
+                --header "Authorization: Bearer ${registry_token}" \
+                --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+                "https://ghcr.io/v2/${image_repository}/manifests/${RELEASE_TAG}"
+            )"; then
+              echo "could not determine whether ${image_repository}:${RELEASE_TAG} exists" >&2
+              exit 1
+            fi
+            case "$manifest_status" in
+              404)
+                echo "GHCR tag ${image_repository}:${RELEASE_TAG} is unused"
+                ;;
+              200)
+                echo "GHCR tag ${image_repository}:${RELEASE_TAG} already exists" >&2
+                exit 1
+                ;;
+              *)
+                echo "GHCR manifest lookup for ${image_repository}:${RELEASE_TAG} returned unexpected HTTP ${manifest_status}" >&2
+                exit 1
+                ;;
+            esac
+          done
+
   container:
     name: Publish Linux containers
-    needs: release-gate
+    needs: [release-gate, build, publication-preflight]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -403,7 +484,7 @@ jobs:
 
   github-release:
     name: Publish GitHub release
-    needs: [build, container, release-gate]
+    needs: [build, container, publication-preflight, release-gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -521,13 +602,227 @@ jobs:
             exit 1
           }
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          tag_name: ${{ needs.release-gate.outputs.tag }}
-          body_path: release-body.md
-          generate_release_notes: true
-          prerelease: ${{ needs.release-gate.outputs.is_stable != 'true' }}
-          make_latest: ${{ needs.release-gate.outputs.is_stable == 'true' }}
-          fail_on_unmatched_files: true
-          files: dist/*
+      - name: Reconfirm the GitHub Release is still unused
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+        run: |
+          response="${RUNNER_TEMP}/stellaris-release-recheck.json"
+          if ! status="$(
+            curl --silent --show-error --location \
+              --output "$response" \
+              --write-out '%{http_code}' \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          )"; then
+            echo "could not reconfirm whether GitHub Release ${RELEASE_TAG} exists" >&2
+            exit 1
+          fi
+          test "$status" = 404 || {
+            echo "GitHub Release ${RELEASE_TAG} appeared after preflight (HTTP ${status})" >&2
+            exit 1
+          }
+
+      - name: Create and publish a new GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-gate.outputs.tag }}
+          IS_PRERELEASE: ${{ needs.release-gate.outputs.is_stable != 'true' }}
+          MAKE_LATEST: ${{ needs.release-gate.outputs.is_stable == 'true' }}
+        run: |
+          set -euo pipefail
+
+          case "$IS_PRERELEASE:$MAKE_LATEST" in
+            true:false|false:true) ;;
+            *) echo "invalid release channel flags" >&2; exit 1 ;;
+          esac
+
+          api_message() {
+            jq -r '
+              if (.message? | type) == "string" then .message
+              else "no API error message"
+              end
+            ' "$1" 2>/dev/null || printf '%s\n' "unparseable API response"
+          }
+
+          create_request="${RUNNER_TEMP}/stellaris-release-create-request.json"
+          create_response="${RUNNER_TEMP}/stellaris-release-create-response.json"
+          jq -n \
+            --arg tag "$RELEASE_TAG" \
+            --argjson prerelease "$IS_PRERELEASE" \
+            --rawfile body release-body.md \
+            '{
+              tag_name: $tag,
+              body: $body,
+              draft: true,
+              prerelease: $prerelease,
+              generate_release_notes: true
+            }' > "$create_request"
+
+          if ! create_status="$(
+            curl --silent --show-error \
+              --output "$create_response" \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --data-binary "@${create_request}" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases"
+          )"; then
+            echo "could not create GitHub Release ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          if [[ "$create_status" != 201 ]]; then
+            echo "create-only GitHub Release request returned HTTP ${create_status}: $(api_message "$create_response")" >&2
+            exit 1
+          fi
+
+          release_id="$(
+            jq -er --arg tag "$RELEASE_TAG" '
+              select(.tag_name == $tag and .draft == true)
+              | .id
+              | select(type == "number" and . > 0)
+            ' "$create_response"
+          )" || {
+            echo "GitHub returned an invalid create response for ${RELEASE_TAG}" >&2
+            exit 1
+          }
+          upload_url="$(
+            jq -er '
+              .upload_url
+              | select(type == "string")
+              | sub("\\{.*$"; "")
+              | select(length > 0)
+            ' "$create_response"
+          )" || {
+            echo "GitHub returned no upload URL for release ${release_id}" >&2
+            exit 1
+          }
+          expected_upload_suffix="/releases/${release_id}/assets"
+          [[ "$upload_url" == *"$expected_upload_suffix" ]] || {
+            echo "GitHub returned an upload URL for a different release" >&2
+            exit 1
+          }
+
+          asset_list="${RUNNER_TEMP}/stellaris-release-assets.list"
+          find dist -maxdepth 1 -type f -print0 | sort -z > "$asset_list"
+          mapfile -d '' asset_paths < "$asset_list"
+          if (( ${#asset_paths[@]} == 0 || ${#asset_paths[@]} > 99 )); then
+            echo "release must contain between 1 and 99 top-level dist assets" >&2
+            exit 1
+          fi
+
+          for index in "${!asset_paths[@]}"; do
+            asset_path="${asset_paths[$index]}"
+            asset_name="${asset_path##*/}"
+            encoded_name="$(jq -rn --arg name "$asset_name" '$name | @uri')"
+            case "$asset_name" in
+              *.tar.gz) content_type=application/gzip ;;
+              *.zip) content_type=application/zip ;;
+              *.json) content_type=application/json ;;
+              *.txt|SHA256SUMS) content_type='text/plain; charset=utf-8' ;;
+              *) content_type=application/octet-stream ;;
+            esac
+
+            upload_response="${RUNNER_TEMP}/stellaris-release-asset-${index}.json"
+            if ! upload_status="$(
+              curl --silent --show-error \
+                --output "$upload_response" \
+                --write-out '%{http_code}' \
+                --request POST \
+                --header 'Accept: application/vnd.github+json' \
+                --header "Authorization: Bearer ${GH_TOKEN}" \
+                --header "Content-Type: ${content_type}" \
+                --header 'X-GitHub-Api-Version: 2022-11-28' \
+                --data-binary "@${asset_path}" \
+                "${upload_url}?name=${encoded_name}"
+            )"; then
+              echo "could not upload release asset ${asset_name}" >&2
+              exit 1
+            fi
+            if [[ "$upload_status" != 201 ]]; then
+              echo "upload of ${asset_name} returned HTTP ${upload_status}: $(api_message "$upload_response")" >&2
+              exit 1
+            fi
+            jq -e --arg name "$asset_name" '
+              (.id | type == "number") and (.id > 0) and (.name == $name)
+            ' "$upload_response" >/dev/null || {
+              echo "GitHub returned an invalid upload response for ${asset_name}" >&2
+              exit 1
+            }
+          done
+
+          assets_response="${RUNNER_TEMP}/stellaris-release-assets.json"
+          if ! assets_status="$(
+            curl --silent --show-error \
+              --output "$assets_response" \
+              --write-out '%{http_code}' \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100"
+          )"; then
+            echo "could not verify assets for release ${release_id}" >&2
+            exit 1
+          fi
+          if [[ "$assets_status" != 200 ]]; then
+            echo "asset verification returned HTTP ${assets_status}: $(api_message "$assets_response")" >&2
+            exit 1
+          fi
+          jq -e --argjson count "${#asset_paths[@]}" '
+            type == "array" and length == $count
+          ' "$assets_response" >/dev/null || {
+            echo "release ${release_id} contains an unexpected asset count" >&2
+            exit 1
+          }
+          for asset_path in "${asset_paths[@]}"; do
+            asset_name="${asset_path##*/}"
+            jq -e --arg name "$asset_name" '
+              [.[] | select(.name == $name)] | length == 1
+            ' "$assets_response" >/dev/null || {
+              echo "release ${release_id} does not contain exactly one ${asset_name}" >&2
+              exit 1
+            }
+          done
+
+          finalize_request="${RUNNER_TEMP}/stellaris-release-finalize-request.json"
+          finalize_response="${RUNNER_TEMP}/stellaris-release-finalize-response.json"
+          jq -n \
+            --arg make_latest "$MAKE_LATEST" \
+            '{draft: false, make_latest: $make_latest}' \
+            > "$finalize_request"
+          if ! finalize_status="$(
+            curl --silent --show-error \
+              --output "$finalize_response" \
+              --write-out '%{http_code}' \
+              --request PATCH \
+              --header 'Accept: application/vnd.github+json' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --data-binary "@${finalize_request}" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+          )"; then
+            echo "could not publish GitHub Release ${release_id}" >&2
+            exit 1
+          fi
+          if [[ "$finalize_status" != 200 ]]; then
+            echo "publishing release ${release_id} returned HTTP ${finalize_status}: $(api_message "$finalize_response")" >&2
+            exit 1
+          fi
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --argjson id "$release_id" \
+            --argjson prerelease "$IS_PRERELEASE" '
+              .id == $id and .tag_name == $tag and .draft == false
+                and .prerelease == $prerelease
+            ' "$finalize_response" >/dev/null || {
+            echo "GitHub returned an invalid finalized release" >&2
+            exit 1
+          }

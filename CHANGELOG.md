@@ -5,8 +5,6 @@
 
 ## [Unreleased]
 
-## [0.3.0-alpha.1] - 2026-07-25
-
 ### Added
 
 - 新增 Quinn 驱动的协调服务、可信 Relay 与按需局域网 P2P 运行时。
@@ -21,6 +19,8 @@
   Agent 身份存储。
 - 新增有界的 Prometheus HTTP `/metrics` 端点；仅在配置 `observability.metrics_bind`
   时监听。
+- 新增统一文档中心、文档驱动改造流程、现代方案调研、验证证据模板，以及 Proposed v3
+  节点身份、分层 CA 和持久地址租约设计。
 
 ### Changed
 
@@ -29,13 +29,18 @@
 - CLI 固定为 `server init|run`、`agent run`、`config check` 和 `token generate`；
   运行时只接受 `--config` 或 `STELLARIS_CONFIG`。
 - Server 与 Agent 配置以及静态节点表统一使用严格 schema 版本 2。
+- TLS `server_name` 只接受严格 ASCII DNS 名或规范单播 IPv4；模糊 dotted-decimal、
+  IPv6、multicast、unspecified 和 broadcast 输入直接拒绝。
 - 分布式运行时只使用 Quinn；s2n-quic 和 gm-quic 继续参与传输抽象编译检查，但
   不能由运行配置选择。
 - 首轮正式运行门禁限定 Linux；macOS 和 Windows 当前只要求编译通过。
+- GitHub Release 发布改为 create-only draft 流程；非 201 创建、非 201 资产上传或资产
+  集合异常均失败关闭，不再进入 update-or-create 路径。
 
 ### Removed
 
-- 删除旧线协议、旧配置、旧运行时、地址租约分配器、后端 CLI 选择和所有兼容适配。
+- 删除旧线协议、旧配置、旧运行时、v1 `StaticAddressAllocator`、后端 CLI 选择和所有
+  兼容适配。
 - 不提供状态迁移器、配置迁移器、双栈 listener、协议降级或混合集群模式。
 - NAT 穿透、server-reflexive candidates、外部 STUN、HA、ACL、IPv6、动态地址和
   管理 API 不进入本版本。

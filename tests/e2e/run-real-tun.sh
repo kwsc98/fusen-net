@@ -22,7 +22,7 @@ if [[ ! -c /dev/net/tun || ! -r /dev/net/tun || ! -w /dev/net/tun ]]; then
   echo "error: /dev/net/tun must be an accessible character device" >&2
   exit 1
 fi
-for command in ip ping; do
+for command in cargo ip ping rg; do
   if ! command -v "$command" >/dev/null; then
     echo "error: $command is required" >&2
     exit 1
