@@ -5,9 +5,9 @@
 > N/A。**
 
 <!-- stellaris-release-status:documentation-status:start -->
-当前运行边界仍是 `0.3.0-alpha.1` v2，代码已经接入，发布门禁尚未完成。v3 身份、信任
-与地址方案仍是 Proposed。文档中的“当前”、“已实现”和“已验证”是不同状态，不能互相
-替代。
+当前运行边界仍是 `0.3.0-alpha.1` v2，代码已经接入，发布门禁尚未完成。目标版本
+`0.4.0-alpha.1` 的 `V3-R1 Identity & Relay Core` 仍是 Proposed、Not started、
+Unverified。文档中的“当前”、“已实现”和“已验证”是不同状态，不能互相替代。
 <!-- stellaris-release-status:documentation-status:end -->
 
 本页是第一方文档的统一目录。开始设计或实现改造前，先阅读
@@ -84,7 +84,7 @@ Verified 状态。
 | 当前 v2 剩余验证门禁 | [`distributed-network-plan.md`](distributed-network-plan.md) | Current planning |
 | 当前、Proposed 与后续方案关系 | [`design-overview.md`](design-overview.md) | Navigation snapshot |
 | 现代方案调研与非规范参考 | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) | Current background |
-| Proposed v3 完整模型和 `V3-P0..V3-P6` | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) | Proposed |
+| Proposed v3 单一身份、动态地址、分层 PKI 与 Relay-only 闭环；`V3-R0`/`V3-R1` | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) | Proposed `0.4.0-alpha.1` |
 | 决策记录 | [`adr/README.md`](adr/README.md) | 按单个 ADR 状态 |
 | 门禁执行证据 | [`verification/README.md`](verification/README.md) | 按目标 commit 记录 |
 | 条件版本顺序 | [`roadmap.md`](roadmap.md) | Current planning |

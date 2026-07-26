@@ -5,8 +5,9 @@
 
 <!-- stellaris-release-status:design-status:start -->
 当前运行边界是 `0.3.0-alpha.1` v2：交付状态 Implemented，验证状态 Unverified。
-NodeUID、动态地址 lease、离线 Root/在线 Intermediate 和线协议 v3 均为 Proposed、
-Not started、Unverified。
+目标版本 `0.4.0-alpha.1` 的 `V3-R1 Identity & Relay Core`，包括 NodeUid、动态地址
+lease、分层 PKI、线协议 v3 和 Relay-only 数据路径，均为 Proposed、Not started、
+Unverified。
 <!-- stellaris-release-status:design-status:end -->
 
 本文只提供状态摘要和阅读入口，不复制线协议、配置字段、证书编码或完整实施门禁。
@@ -15,7 +16,7 @@ Not started、Unverified。
 
 ## 核心结论
 
-Stellaris 近期采用“中心化信任与协调、尽量分布式数据面”的混合架构：
+当前 `0.3.0-alpha.1` v2 采用中心化协调、可信 Relay 与按需 P2P 的混合架构：
 
 - 一个逻辑 Server 负责 enrollment、授权、节点目录、连接计划和可信 Relay；
 - 普通节点运行 Agent，不是每个节点都运行 Stellaris Server；
@@ -24,8 +25,10 @@ Stellaris 近期采用“中心化信任与协调、尽量分布式数据面”�
   授权状态和 overlay IP 所有权校验；
 - 稳态下一个 Agent 使用一把节点私钥和一张当前 leaf，Control、Relay、P2P 共用；
 - P2P 使用节点间 mTLS；Relay 回退在 Server 解密，Relay 能看到完整回退包和元数据；
-- 推荐下一次改造是 v3 身份、PKI 与地址基础，不是先做 NAT 穿透；
-- v3 直接删除 v2，不提供迁移器、双栈 listener、协议降级或兼容 feature。
+- 下一次 Proposed 改造是 `V3-R1 Identity & Relay Core`：统一身份、PKI、动态地址、
+  持久恢复和可信 Relay 闭环，数据路径仅保留 Relay；
+- v3 直接替换 v2，不提供迁移器、双栈 listener、协议降级或兼容 feature，也不保留
+  P2P listener、ALPN、消息、配置或运行时占位。
 
 首轮仍是自托管、单组织、单信任域和单协调实例，不是完全去中心化或多信任域网络。
 现代系统与规范的比较及采用理由见
@@ -36,12 +39,12 @@ Stellaris 近期采用“中心化信任与协调、尽量分布式数据面”�
 
 | 维度 | 当前 v2 | Proposed v3 | 后续方向 |
 | --- | --- | --- | --- |
-| 长期身份 | 大小写敏感 `node_id` | `TrustDomainId + NodeUID` | 跨域 principal/capability |
+| 长期身份 | 大小写敏感 `node_id` | `TrustDomainId + NodeUid` | 跨域 principal/capability |
 | 可读名称 | 与身份共用 `node_id` | 独立 NodeName + name epoch | 跨域命名策略 |
-| Overlay 地址 | `nodes.toml` 静态 IPv4 | NodeUID 的持久动态 lease | 每域 IPv6 prefix |
+| Overlay 地址 | `nodes.toml` 静态 IPv4 | NodeUid 的持久动态 lease | 每域 IPv6 prefix |
 | 节点 PKI | Server 在线持有自签 node CA | 离线 Root + 在线 Intermediate + issuer manifest | 跨域 trust bundle/硬件根 |
-| 节点凭据 | 一把 P-256 key、一张当前 leaf | 保持一 key/leaf，增加 UID/IP/epoch claims | 按威胁模型评估硬件密钥 |
-| 数据路径 | 可信 Relay + host-candidate P2P | 保持 Relay-first 和单路径语义 | NAT 穿透、多路径、Relay E2E |
+| 节点凭据 | 一把 P-256 key、一张当前 leaf | 一把 operational key、一张当前 leaf，增加 UID/IP/epoch claims | 按威胁模型评估硬件密钥 |
+| 数据路径 | 可信 Relay + host-candidate P2P | 仅可信 Relay；绑定 Ready control session 后安装单一路由 | 其他数据路径另行设计和决策 |
 | 控制面 | 单 Coordinator | 单 Coordinator | HA/Raft；恶意控制器威胁才考虑 BFT |
 | 租户与策略 | 单租户全互通 | 不变 | 多租户、ACL/capability |
 | 运行传输 | Quinn | Quinn | 其他 QUIC runtime 后置 |
@@ -91,31 +94,31 @@ Ready 或路径计数本身不能替代这些证据。精确线格式、配置�
 v3 把当前耦合的身份、名称、地址、密钥、证书和会话拆成独立生命周期：
 
 ```text
-TrustDomainId + NodeUID   durable principal
+TrustDomainId + NodeUid   durable principal
 NodeName + name_epoch     human-readable directory label
 AddressLease + allocation_epoch
 authorized SPKI + key_epoch
 lifecycle + state_epoch + revocation_epoch
-short-lived certificate  signed proof of current claims
-session/incarnation       online connection state
+short-lived certificate             signed proof of current claims
+ControlSessionId/RelaySessionId     online connection ownership
 ```
 
 关键设计摘要：
 
-- NodeUID 由首次成功 enrollment 的 Server 使用系统 CSPRNG 生成 UUIDv7，并由持久 store
+- NodeUid 由首次成功 enrollment 的 Server 使用系统 CSPRNG 生成 UUIDv7，并由持久 store
   的唯一约束和幂等事务最终裁决；
 - NodeName 可改名但不是安全身份；改名只增加 name epoch，不改变证书或数据路径；
-- 节点生命周期为 Active、Disabled、Revoked、Released；首次 admission 在 NodeUID
-  生成前独立存在，replacement admission 绑定已有 NodeUID；
-- 地址使用 Free、Reserved、Allocated、Quarantined 持久状态机。lease 属于 NodeUID，
+- 节点生命周期为 Active、Disabled、Revoked、Released；首次 admission 在 NodeUid
+  生成前独立存在，replacement admission 绑定已有 NodeUid；
+- 地址使用 Free、Reserved、Allocated、Quarantined 持久状态机。lease 属于 NodeUid，
   不是某张短期证书；释放后必须按最后签发期限水位隔离再复用；
 - 节点 PKI 改为离线 Root、在线 Intermediate 和 Root 签名 issuer manifest。Agent 只
   保存 Root 公钥/证书与 manifest，在线 Server 不持有 Root 私钥；
-- 一把 operational key 和一张当前 leaf 继续供 Control、Relay、P2P 使用；验证还必须
+- 一把 operational key 和一张当前 leaf 供 Control、Relay 使用；验证还必须
   检查链、issuer manifest、principal、IP、SPKI、epoch 和当前授权状态；
 - 地址、名称或证书都不能代替长期 principal；公开证书本身也不能证明仍获授权；
-- 本地管理入口负责 create、rename、disable/enable、revoke、rotate-token 和 release；
-  Agent 显式 re-enroll 处理安全换钥和不确定提交恢复；
+- 本地管理入口负责 admission create/replace/cancel 及 node rename、disable/enable、
+  revoke、release；Agent 显式 enroll/re-enroll 处理首次注册、安全换钥和不确定提交恢复；
 - 备份必须绑定一致 state generation。无法证明快照最新时进入 recovery mode，禁止
   签发、路由和地址复用。
 
@@ -133,9 +136,11 @@ session/incarnation       online connection state
 - 删除 v2 listener、codec、静态地址 runtime 和 adapter；
 - v2 配置、状态、证书和 Agent 全部拒绝；
 - 切换部署重新初始化 v3 PKI/state，并重新 enrollment 所有 Agent；
+- 只开放 enrollment、control 和 Relay 三条 v3 ALPN，所有 overlay 数据只经可信 Relay；
 - 中间实现不得发布为 v2/v3 混合可用版本。
 
-ADR 0003 的 Relay-first、按需 P2P、单路径和失败包不补发继续有效。
+ADR 0003 继续记录当前 v2 数据路径；Proposed v3 不沿用其中的 P2P 公共 surface。只有
+ADR 0004 Accepted、详细设计 Approved 并完成实现后，Relay-only 才能成为 Current。
 
 ## 实施顺序
 
@@ -143,39 +148,34 @@ ADR 0003 的 Relay-first、按需 P2P、单路径和失败包不补发继续有�
 current v2 alpha
        |
        v
-reusable v2 baseline gates
+V3-R0: freeze the Proposed contract and ADR decision
        |
        v
-V3-P0: freeze candidate semantics -> ADR 0004 decision
-       | accepted                     | rejected
-       v                              v
-destructive v3 V3-P1..V3-P6     finish all v2 release gates
+ADR 0004 Accepted + design Approved + approval commit
        |
        v
-conditional NAT and scale work
+V3-R1: destructive single-model implementation
+       |
+       v
+Evidence-only records for the merged target commit
 ```
 
-v3 会删除 v2，所以不先在 v2 重复执行全部长期发布门禁。ADR 决策前先完成可复用的
-workspace、最小网络闭环、单路径/session ABA、256 条状态和持久化/TUN harness；这些
-`V2-B*` 原子门禁见
-[`distributed-network-plan.md`](distributed-network-plan.md#v3-决策前的可复用基线)。
-随后由唯一的 `V3-P0` 冻结候选 v3 语义并作出 ADR 决策；全部 `V3-P*` 阶段和原子 Gate
-ID 只由
+当前 v2 的开放门禁继续记录当前验证事实，但不是 `V3-R0` 或 `V3-R1` 的进入条件。
+`V3-R0` 只负责冻结设计、接受 ADR 和记录批准 commit；`V3-R1` 在一个纵向实现阶段中
+完成唯一 v3 模型，并在合入后对目标 commit 单独归档证据。阶段和原子 Gate ID 只由
 [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) 定义。
 
-三类“256”证据不能混用：
+本阶段的容量和网络证据不能混用：
 
-- v2 基线是在至少 `/23` 中验证 256 条目录/状态记录，不启动 256 个在线 Agent；
-- `V3-P6` 是至少 `/23` 中的 256 个持久 lease 状态，以及小规模 30 分钟连接稳定性；
-- Conditional `0.6` 才是 256 个在线 Agent 的完整资源 soak。
+- `V3-R1` 容量 Gate 在至少 `/23` 中验证 256 个持久 lease，不启动 256 个在线 Agent；
+- `V3-R1` Linux Gate 只验证两个 Agent 的真实 TUN Relay 闭环；
+- 30 分钟 soak 和 256 个在线 Agent 的资源验证均属于未编号后续工作。
 
 ## 后续方向
 
-只有 v3 被接受、实现并通过门禁后，NAT 与规模阶段的条件编号才成立：
-
-- Conditional `0.5`：server-reflexive candidate、同时打洞、NAT 实验矩阵和 Relay 回退；
-- Conditional `0.6`：256 在线 Agent、资源 soak、指标/健康检查、持续 fuzz 和故障注入；
-- `1.0`：Linux 稳定发布及明确跨平台支持矩阵。
+`V3-R1` 之后的工作尚未编号。candidate/NAT、其他数据路径、256 在线 Agent、长期 soak、
+指标/健康检查和稳定发布都必须重新设计、单独决策并定义自己的退出门禁，不能作为
+`0.4.0-alpha.1` 的隐含能力或前置条件。
 
 多协调服务 HA、多信任域 federation、ACL、多租户、IPv6、Relay 路径端到端加密、
 TPM/attestation、BFT/阈值签名、外部 STUN/TURN、DNS、默认/子网路由和其他 QUIC runtime
@@ -196,7 +196,7 @@ TPM/attestation、BFT/阈值签名、外部 STUN/TURN、DNS、默认/子网路�
 | 当前 v2 未完成门禁 | [`distributed-network-plan.md`](distributed-network-plan.md) |
 | 现代方案调研（非规范） | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) |
 | 已接受的数据路径决策 | [`ADR 0003`](adr/0003-coordinator-p2p-relay-fallback.md) |
-| Proposed v3 决策摘要 | [`ADR 0004`](adr/0004-durable-node-identity-and-address-leases.md) |
-| Proposed v3 完整模型与 Gate ID | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
+| Proposed `V3-R1 Identity & Relay Core` 决策摘要 | [`ADR 0004`](adr/0004-durable-node-identity-and-address-leases.md) |
+| Proposed `V3-R0`/`V3-R1` 完整模型与 Gate ID | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
 | 条件版本顺序 | [`roadmap.md`](roadmap.md) |
 | 门禁执行记录 | [`verification/README.md`](verification/README.md) |
