@@ -1,6 +1,6 @@
 # Stellaris 最新方案总览
 
-> **方案快照：2026-07-26。文档适用性：Current；适用范围：导航摘要；设计评审状态：
+> **方案快照：2026-08-03。文档适用性：Current；适用范围：导航摘要；设计评审状态：
 > N/A；ADR 决策状态：N/A；交付状态：N/A；验证状态：N/A；发布状态：N/A。**
 
 <!-- stellaris-release-status:design-status:start -->
@@ -34,6 +34,19 @@ Unverified。
 现代系统与规范的比较及采用理由见
 [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md)，该调研不是
 当前协议规范。
+
+## Proposed 产品方向与 AI 治理
+
+[`产品方向与 AI 迭代治理改造计划`](product-direction-and-iteration-governance-plan.md)
+是另一份 Proposed / Draft 候选。它提议先冻结 Stellaris 作为弹性算力调度平台网络底座
+的产品边界，再通过人工激活的单一 Work Item、单 Gate、精确路径和风险审查约束 AI
+迭代。关联的 [ADR 0005](adr/0005-elastic-compute-network-product-boundary.md) 与
+[ADR 0006](adr/0006-human-controlled-ai-iteration.md) 均为 Proposed。
+
+该 Draft 与既有 v3 候选在单租户、单 Coordinator、256 节点和 Relay-only 等方向上存在
+冲突，因此提议在治理完成后另开技术 Design-only 决策。当前并未接受这两份新 ADR，
+也未批准新设计；ADR 0004 仍为 Proposed，既有 v3 仍为 Draft / Not started。新增导航
+不改变当前 v2 能力、既有路线顺序或任何支持状态。
 
 ## 状态矩阵
 
@@ -198,5 +211,8 @@ TPM/attestation、BFT/阈值签名、外部 STUN/TURN、DNS、默认/子网路�
 | 已接受的数据路径决策 | [`ADR 0003`](adr/0003-coordinator-p2p-relay-fallback.md) |
 | Proposed `V3-R1 Identity & Relay Core` 决策摘要 | [`ADR 0004`](adr/0004-durable-node-identity-and-address-leases.md) |
 | Proposed `V3-R0`/`V3-R1` 完整模型与 Gate ID | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
+| Proposed 弹性算力网络产品边界决策 | [`ADR 0005`](adr/0005-elastic-compute-network-product-boundary.md) |
+| Proposed 人工控制 AI 迭代治理决策 | [`ADR 0006`](adr/0006-human-controlled-ai-iteration.md) |
+| Proposed 产品方向、工作队列与治理 Gate | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) |
 | 条件版本顺序 | [`roadmap.md`](roadmap.md) |
 | 门禁执行记录 | [`verification/README.md`](verification/README.md) |
