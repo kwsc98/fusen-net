@@ -90,7 +90,7 @@ Verified 状态。
 | 当前、Proposed 与后续方案关系 | [`design-overview.md`](design-overview.md) | Navigation snapshot |
 | 现代方案调研与非规范参考 | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) | Current background |
 | Proposed v3 单一身份、动态地址、分层 PKI 与 Relay-only 闭环；`V3-R0`/`V3-R1` | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) | Proposed `0.4.0-alpha.1` |
-| Proposed 产品方向、Product Goal、AI 权限与工作队列；`GOV-R0..R4` | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) | Proposed / Draft；不改变 Current 或既有 v3 状态 |
+| Proposed 产品方向、Product Goal、单一 Active Work Item 与 AI 权限；`GOV-R0..R4` | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) | Proposed / Draft；不改变 Current 或既有 v3 状态 |
 | 决策记录 | [`adr/README.md`](adr/README.md) | 按单个 ADR 状态 |
 | 门禁执行证据 | [`verification/README.md`](verification/README.md) | 按目标 commit 记录 |
 | 条件版本顺序 | [`roadmap.md`](roadmap.md) | Current planning |

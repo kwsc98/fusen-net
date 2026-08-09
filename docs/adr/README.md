@@ -25,7 +25,7 @@ ADR 一经接受不直接重写历史结论；被新决策替代时标为 Supers
 | [0003](0003-coordinator-p2p-relay-fallback.md) | Current | Accepted | Implemented | 协调服务、可信 Relay、按需 LAN P2P 和单路径回退 |
 | [0004](0004-durable-node-identity-and-address-leases.md) | Proposed | Proposed | Not started | `0.4.0-alpha.1` 的 `V3-R1 Identity & Relay Core`：单一身份、动态地址、分层 PKI、恢复与 Relay-only 候选 |
 | [0005](0005-elastic-compute-network-product-boundary.md) | Proposed | Proposed | Not started | 弹性算力调度平台网络底座的产品边界、信任模型、规模与优先级候选 |
-| [0006](0006-human-controlled-ai-iteration.md) | Proposed | Proposed | Not started | 人工激活 Work Item、AI 权限、风险审查与停止条件候选 |
+| [0006](0006-human-controlled-ai-iteration.md) | Proposed | Proposed | Not started | 单一 Active Work Item、人工激活、AI 权限、独立审查与停止条件候选 |
 
 ADR 0003 继续记录当前 v2 的协调、P2P 与 Relay 回退决策，状态保持 Current、Accepted、
 Implemented、Unverified。ADR 0004 只描述尚未批准或实现的 v3 候选；其 Relay-only

@@ -37,7 +37,7 @@ Unverified。
 
 ## Proposed 产品方向与 AI 治理
 
-[`产品方向与 AI 迭代治理改造计划`](product-direction-and-iteration-governance-plan.md)
+[`产品方向与 AI 迭代治理计划`](product-direction-and-iteration-governance-plan.md)
 是另一份 Proposed / Draft 候选。它提议先冻结 Stellaris 作为弹性算力调度平台网络底座
 的产品边界，再通过人工激活的单一 Work Item、单 Gate、精确路径和风险审查约束 AI
 迭代。关联的 [ADR 0005](adr/0005-elastic-compute-network-product-boundary.md) 与
@@ -213,6 +213,6 @@ TPM/attestation、BFT/阈值签名、外部 STUN/TURN、DNS、默认/子网路�
 | Proposed `V3-R0`/`V3-R1` 完整模型与 Gate ID | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
 | Proposed 弹性算力网络产品边界决策 | [`ADR 0005`](adr/0005-elastic-compute-network-product-boundary.md) |
 | Proposed 人工控制 AI 迭代治理决策 | [`ADR 0006`](adr/0006-human-controlled-ai-iteration.md) |
-| Proposed 产品方向、工作队列与治理 Gate | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) |
+| Proposed 产品方向、单一 Active Work Item 与治理 Gate | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) |
 | 条件版本顺序 | [`roadmap.md`](roadmap.md) |
 | 门禁执行记录 | [`verification/README.md`](verification/README.md) |

@@ -25,18 +25,18 @@
 
 ## Proposed 产品方向与治理 Draft（尚未进入路线）
 
-[`产品方向与 AI 迭代治理改造计划`](product-direction-and-iteration-governance-plan.md)、
+[`产品方向与 AI 迭代治理计划`](product-direction-and-iteration-governance-plan.md)、
 [ADR 0005](adr/0005-elastic-compute-network-product-boundary.md) 和
 [ADR 0006](adr/0006-human-controlled-ai-iteration.md) 提议先冻结弹性算力网络产品边界，
-再分 Gate 建立 Current 产品方向、人工激活 Work Item、AI 权限和机器合同。当前三份记录
-仍为 Draft / Proposed / Not started，不改变本页既有 Current 阶段顺序。
+再分 Gate 建立 Current 产品方向、人工激活的单一 Work Item、AI 权限和最小机器合同。
+当前三份记录仍为 Draft / Proposed / Not started，不改变本页既有 Current 阶段顺序。
 
-候选顺序是 `GOV-R0` Design-only，随后在 ADR Accepted、设计 Approved 和完整批准 commit
-齐备后分别推进 `GOV-R1..R4` Implementation；其中 GOV-R2 的 Work Item、queue、
-Planning-only 和 GOV-R4 的 template、checker、CI 均拆为独立原子 Gate。Planning-only
-与队列 enforcement 只有在最终 CI Gate 对应 Implementation 合入后才可能启用；Gate
-结果仍须后续 Evidence-only 记录。治理完成后还必须另开 v2 基线与新算力网络技术
-Design-only；本 Draft 不授权直接进入旧 V3-R1 或任何 runtime 实现。
+候选共六个原子 Gate：先以 `GOV-R0` Design-only 冻结合同；ADR Accepted、设计 Approved
+和完整批准 commit 齐备后，再依次推进 Current 方向、Work Item 与空 Active 指针、AI
+policy、checker/test 和最终 CI 启用五个 Implementation Gate。项目不建立机器 Next
+队列；Planning-only 与 Active enforcement 只有在最终 CI Gate 对应 Implementation
+合入后才生效，Gate 结果仍须后续 Evidence-only 记录。治理完成后还必须另开 v2 基线
+与新算力网络技术 Design-only；本 Draft 不授权直接进入旧 V3-R1 或任何 runtime 实现。
 
 ## Proposed `0.4.0-alpha.1`：`V3-R1 Identity & Relay Core`
 
