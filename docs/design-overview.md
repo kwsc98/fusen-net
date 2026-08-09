@@ -32,7 +32,7 @@ Unverified。
 
 首轮仍是自托管、单组织、单信任域和单协调实例，不是完全去中心化或多信任域网络。
 现代系统与规范的比较及采用理由见
-[`modern-distributed-network-survey.md`](modern-distributed-network-survey.md)，该调研不是
+[`modern-distributed-network-survey.md`](research/modern-distributed-network-survey.md)，该调研不是
 当前协议规范。
 
 ## Proposed 产品方向与 AI 治理
@@ -207,7 +207,7 @@ TPM/attestation、BFT/阈值签名、外部 STUN/TURN、DNS、默认/子网路�
 | 当前信任与威胁边界 | [`security-model.md`](security-model.md) |
 | 当前平台与支持等级 | [`compatibility.md`](compatibility.md) |
 | 当前 v2 未完成门禁 | [`distributed-network-plan.md`](distributed-network-plan.md) |
-| 现代方案调研（非规范） | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) |
+| 现代方案调研（非规范） | [`modern-distributed-network-survey.md`](research/modern-distributed-network-survey.md) |
 | 已接受的数据路径决策 | [`ADR 0003`](adr/0003-coordinator-p2p-relay-fallback.md) |
 | Proposed `V3-R1 Identity & Relay Core` 决策摘要 | [`ADR 0004`](adr/0004-durable-node-identity-and-address-leases.md) |
 | Proposed `V3-R0`/`V3-R1` 完整模型与 Gate ID | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |

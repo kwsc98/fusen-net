@@ -126,7 +126,7 @@ The authoritative Chinese references are the
 [documentation center](docs/README.md),
 [documentation-driven change workflow](docs/documentation-workflow.md),
 [design overview](docs/design-overview.md),
-[modern design survey](docs/modern-distributed-network-survey.md),
+[modern design survey](docs/research/modern-distributed-network-survey.md),
 [architecture](docs/architecture.md),
 [v2 protocol](docs/protocol.md), [configuration](docs/configuration.md),
 [security model](docs/security-model.md),

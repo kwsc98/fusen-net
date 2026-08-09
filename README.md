@@ -142,7 +142,7 @@ TUN；Agent 在 Linux 上需要 `/dev/net/tun`、`iproute2` 提供的 `ip` 命�
 - [文档中心、状态与权威边界](docs/README.md)
 - [文档驱动改造流程](docs/documentation-workflow.md)
 - [最新方案总览（当前 v2 / Proposed v3 / 后续方向）](docs/design-overview.md)
-- [现代分布式组网方案调研（非规范参考）](docs/modern-distributed-network-survey.md)
+- [现代分布式组网方案调研（非规范参考）](docs/research/modern-distributed-network-survey.md)
 - [架构](docs/architecture.md)
 - [v2 线协议](docs/protocol.md)
 - [配置参考](docs/configuration.md)

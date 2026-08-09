@@ -131,7 +131,7 @@ Raft 解决协调服务的 crash fault 和一致状态复制；BFT、阈值签�
 - [NIST Threshold Cryptography project](https://csrc.nist.gov/projects/threshold-cryptography)
 - [SCION cryptography overview](https://docs.scion.org/en/latest/cryptography/index.html)
 
-项目规范选择以 [`design-overview.md`](design-overview.md)、
-[`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) 和相关 ADR
+项目规范选择以 [`design-overview.md`](../design-overview.md)、
+[`node-identity-trust-addressing-plan.md`](../node-identity-trust-addressing-plan.md) 和相关 ADR
 为准；外部资料与项目权威文档冲突时，先通过新 ADR 更新项目决策，不能直接按外部实现
 修改协议。

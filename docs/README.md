@@ -1,6 +1,6 @@
 # Stellaris 文档中心
 
-> **文档快照：2026-08-03。文档适用性：Current；适用范围：文档目录与状态模型；
+> **文档快照：2026-08-09。文档适用性：Current；适用范围：文档目录与状态模型；
 > 设计评审状态：N/A；ADR 决策状态：N/A；交付状态：N/A；验证状态：N/A；发布状态：
 > N/A。**
 
@@ -10,7 +10,8 @@
 Unverified。文档中的“当前”、“已实现”和“已验证”是不同状态，不能互相替代。
 <!-- stellaris-release-status:documentation-status:end -->
 
-本页是第一方文档的统一目录。开始设计或实现改造前，先阅读
+本页是第一方文档的统一目录。`docs/` 根目录只保留日常设计、实现和治理需要直接引用的
+核心权威文档；调研等非规范背景材料按类别归入子目录。开始设计或实现改造前，先阅读
 [`documentation-workflow.md`](documentation-workflow.md)，并从下表找到本次变更的
 权威文档。使用 AI 参与开发时，还必须先完整阅读
 [`ai-iteration-playbook.md`](ai-iteration-playbook.md)。若两份文档冲突，不按“更新时间
@@ -25,7 +26,7 @@ Unverified。文档中的“当前”、“已实现”和“已验证”是不�
 | 部署或排障 | [`configuration.md`](configuration.md) -> [`deployment.md`](deployment.md) -> [`troubleshooting.md`](troubleshooting.md) |
 | 评审产品方向与 AI 治理 Draft | [`design-overview.md`](design-overview.md) -> [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) -> [`adr/0005-elastic-compute-network-product-boundary.md`](adr/0005-elastic-compute-network-product-boundary.md) 与 [`adr/0006-human-controlled-ai-iteration.md`](adr/0006-human-controlled-ai-iteration.md) |
 | 评审既有 v3 技术候选 | [`design-overview.md`](design-overview.md) -> [`adr/0004-durable-node-identity-and-address-leases.md`](adr/0004-durable-node-identity-and-address-leases.md) -> [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) |
-| 调研现代方案 | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) -> [`design-overview.md`](design-overview.md) |
+| 调研现代方案 | [`research/modern-distributed-network-survey.md`](research/modern-distributed-network-survey.md) -> [`design-overview.md`](design-overview.md) |
 | 使用 AI 开始一次迭代 | [`../AGENTS.md`](../AGENTS.md) -> [`ai-iteration-playbook.md`](ai-iteration-playbook.md) -> [`documentation-workflow.md`](documentation-workflow.md) -> 本次目标设计/ADR/Gate |
 | 参与开发或发布 | [`documentation-workflow.md`](documentation-workflow.md) -> [`../CONTRIBUTING.md`](../CONTRIBUTING.md) -> [`releasing.md`](releasing.md) |
 
@@ -88,7 +89,7 @@ Verified 状态。
 | 部署与故障恢复操作 | [`deployment.md`](deployment.md)、[`troubleshooting.md`](troubleshooting.md) | Current v2 |
 | 当前 v2 剩余验证门禁 | [`distributed-network-plan.md`](distributed-network-plan.md) | Current planning |
 | 当前、Proposed 与后续方案关系 | [`design-overview.md`](design-overview.md) | Navigation snapshot |
-| 现代方案调研与非规范参考 | [`modern-distributed-network-survey.md`](modern-distributed-network-survey.md) | Current background |
+| 现代方案调研与非规范参考 | [`research/modern-distributed-network-survey.md`](research/modern-distributed-network-survey.md) | Current background；不属于根目录核心规范 |
 | Proposed v3 单一身份、动态地址、分层 PKI 与 Relay-only 闭环；`V3-R0`/`V3-R1` | [`node-identity-trust-addressing-plan.md`](node-identity-trust-addressing-plan.md) | Proposed `0.4.0-alpha.1` |
 | Proposed 产品方向、Product Goal、单一 Active Work Item 与 AI 权限；`GOV-R0..R4` | [`product-direction-and-iteration-governance-plan.md`](product-direction-and-iteration-governance-plan.md) | Proposed / Draft；不改变 Current 或既有 v3 状态 |
 | 决策记录 | [`adr/README.md`](adr/README.md) | 按单个 ADR 状态 |
@@ -130,6 +131,8 @@ README / design-overview        入口与状态摘要
         +-- deployment          操作手册
         +-- troubleshooting     排障手册
         +-- releasing           发布证据
+        |
+        +-- research/          非规范调研与背景材料
 ```
 
 同一个协议字段、配置字段或状态机不得在多份文档中各自形成规范。其他文档可以摘要，
